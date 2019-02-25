@@ -19,6 +19,9 @@ def main():
     for fam in pedigree.getFamilies() :
         FamilyImputation.imputeFam(fam, pedigree)
 
+    pedigree.writePhase(args.out + ".phase")
+    pedigree.writeGenotypes(args.out + ".genotypes")
+    pedigree.writeDosages(args.out + ".dosages")
 
 if __name__ == "__main__":
     main()

@@ -1,1 +1,1 @@
-python AlphaCall.py -out outputs/out -seqfile basedata/reads.txt -threshold 0.98
+python AlphaFamImpute.py -out out -genotypes example/genotypes.txt -pedigree example/pedigree.txt

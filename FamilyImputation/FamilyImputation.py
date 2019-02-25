@@ -2,6 +2,7 @@ from tinyhouse import HaplotypeOperations
 from tinyhouse import BasicHMM
 import math
 
+import numpy as np
 
 def imputeFam(fam, pedigree) :
 
@@ -28,12 +29,13 @@ def imputeFam(fam, pedigree) :
     phaseParentsViaSegregationGroups(fam.sire, fam.dam, hdChildren)
 
     #STEP 3: Take all of the LD children and impute from the parents.
+    nLoci = len(fam.sire.genotypes)
     for child in ldChildren:
         BasicHMM.diploidHMM(child, fam.sire.haplotypes, fam.dam.haplotypes, 0.01, 1.0/nLoci)
 
 
 def phaseParentsViaSegregationGroups(sire, dam, children):
-    nLoci = length(sire.genotypes)
+    nLoci = len(sire.genotypes)
 
 
     # Start at some loci (let's say at the middle of the chromosome)
@@ -53,13 +55,19 @@ def phaseParentsViaSegregationGroups(sire, dam, children):
         paternal = child.haplotypes[0][sireStart]
         maternal = child.haplotypes[0][damStart]
         groups[midpoint][paternal][maternal].append(child) #I'm just going to append the child... for reasons.
+
     # STEP 3: Progress across the chromosome and figure out how the groups change over time.
+
+    updateGroups(groups[midpoint], groups[midpoint], midpoint, midpoint, sire, dam, children, noUpdate = True)
 
     for i in range(midpoint + 1, nLoci):
         updateGroups(groups[i-1], groups[i], i-1, i, sire, dam, children)
 
+    for i in range(midpoint -1, -1, -1):
+        updateGroups(groups[i+1], groups[i], i+1, i, sire, dam, children)
 
-def updateGroups(currentGroups, nextGroups, currentLoci, nextLoci, sire, dam, children) :
+
+def updateGroups(currentGroups, nextGroups, currentLoci, nextLoci, sire, dam, children, noUpdate = False) :
 
     # Check possible phasings, and correct genotyping errors.
     sireOptions = getOptions(sire.genotypes[nextLoci])
@@ -84,8 +92,8 @@ def updateGroups(currentGroups, nextGroups, currentLoci, nextLoci, sire, dam, ch
     dam.haplotypes[1][nextLoci] = damPhase[1]
 
     # Re-align the groups around that option.
-    
-    createNextGroups(chosenPair, currentGroups, nextGroups, nextLoci)
+    if not noUpdate:
+        createNextGroups(chosenPair, currentGroups, nextGroups, nextLoci)
 
 def createNextGroups(pair, currentGroups, nextGroups, loci):
     genotypes = getGenotypesFromPair(pair)
@@ -108,6 +116,19 @@ def createNextGroups(pair, currentGroups, nextGroups, loci):
 
                 else: # To account for genotyping error.
                     nextGroups[i][j].append(ind)
+
+def getOptions(genotype):
+    if genotype == 0:
+        return [(0, 0)]
+    
+    if genotype == 1:
+        return [(0, 1), (1, 0)]
+    
+    if genotype == 2:
+        return [(1, 1)]
+
+    if genotype == 9:
+        return [(0, 0), (0, 1), (1, 0), (1, 1)]
 
 def getGenotypesFromPair(pair):
     sire, dam = pair
@@ -132,16 +153,16 @@ def evaluatePair(pair, currentGroups, loci):
     return numErrors
 
 def getHetLoci(target, alt):
-    nLoci = length(target.genotypes)
+    nLoci = len(target.genotypes)
     midpoint = math.floor(nLoci/2)
     locus = -1
     i = 0
     while locus < 0 and i < (nLoci/2 + 1):
         forward = min(nLoci - 1, midpoint + i) 
         backward = max(0, midpoint - i) 
-        if target.genotypes[forward] == 1 and alt.genotype[forward] != 1:
-            locus = forwards
-        if target.genotypes[backward] == 1 and alt.genotype[backward] != 1:
+        if target.genotypes[forward] == 1 and alt.genotypes[forward] != 1:
+            locus = forward
+        if target.genotypes[backward] == 1 and alt.genotypes[backward] != 1:
             locus = backward
         i += 1
 

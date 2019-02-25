@@ -1,9 +1,11 @@
-output = read.table("outputs/out.called.0.98")
-target = read.table("basedata/target.txt")
+output = as.matrix(read.table("out.dosages"))
+target = as.matrix(read.table("example/trueGenotypes.txt"))
 
-if(all(output == target)) {
-    print("Test succeeded")
-}else{
-    print("Test failed")
-}
+indAcc = sapply(23:102, function(i) {
+            return(cor(output[i, -1], target[i, -1]))
+    })
+
+markerAcc = sapply(2:ncol(output), function(i) {
+            return(cor(output[23:102, i], target[23:102, i]))
+    })
 
