@@ -4,7 +4,18 @@ import math
 
 import numpy as np
 
-def imputeFam(fam, pedigree) :
+
+def imputeFamFromPhasedParents(fam, pedigree) :
+
+    #Pipeline:
+    # 1) Take all of the children and impute from the parents.
+
+    # STEP 1: Take all of the LD children and impute from the parents.
+    nLoci = len(fam.sire.genotypes)
+    for child in fam.offspring:
+        BasicHMM.diploidHMM(child, fam.sire.haplotypes, fam.dam.haplotypes, 0.01, 1.0/nLoci)
+
+def imputeFamUsingFullSibs(fam, pedigree) :
 
     #Pipeline:
     # 0) Get LD and HD children.
@@ -19,6 +30,10 @@ def imputeFam(fam, pedigree) :
 
     # STEP 1: Take all the children and phase via parents homozygous loci.
 
+    for ind in [fam.sire, fam.dam]:
+        HaplotypeOperations.setup_individual(ind)
+        HaplotypeOperations.align_individual(ind)
+
     for ind in hdChildren:
         HaplotypeOperations.setup_individual(ind)
         HaplotypeOperations.fillFromParents(ind)
@@ -27,6 +42,11 @@ def imputeFam(fam, pedigree) :
     #STEP 2: Take all of the HD children and phase/(impute?) the parents.
 
     phaseParentsViaSegregationGroups(fam.sire, fam.dam, hdChildren)
+
+    #Just re-align the parents sowe get imputed genotypes from them on the output.
+    for ind in [fam.sire, fam.dam]:
+        HaplotypeOperations.align_individual(ind)
+
 
     #STEP 3: Take all of the LD children and impute from the parents.
     nLoci = len(fam.sire.genotypes)
@@ -53,7 +73,7 @@ def phaseParentsViaSegregationGroups(sire, dam, children):
     groups = [ [[[], []], [[],[]]] for i in range(nLoci)]
     for child in children:
         paternal = child.haplotypes[0][sireStart]
-        maternal = child.haplotypes[0][damStart]
+        maternal = child.haplotypes[1][damStart] #This may be odd if the child is missing here.
         groups[midpoint][paternal][maternal].append(child) #I'm just going to append the child... for reasons.
 
     # STEP 3: Progress across the chromosome and figure out how the groups change over time.
@@ -102,20 +122,21 @@ def createNextGroups(pair, currentGroups, nextGroups, loci):
         for j in range(2):
             for ind in currentGroups[i][j]:
                 geno = ind.genotypes[loci]
-                if geno == genotypes[i][j]:                    
-                    nextGroups[i][j].append(ind)
+                if geno != 9: # To account for missing child data.
+                    if geno == genotypes[i][j]:                    
+                        nextGroups[i][j].append(ind)
 
-                elif geno == genotypes[1-i][j]:                    
-                    nextGroups[1-i][j].append(ind)
-                
-                elif geno == genotypes[i][1-j]:                    
-                    nextGroups[i][1-j].append(ind)
-                
-                elif geno == genotypes[1-i][1-j]:                    
-                    nextGroups[1-i][1-j].append(ind)
+                    elif geno == genotypes[1-i][j]:                    
+                        nextGroups[1-i][j].append(ind)
+                    
+                    elif geno == genotypes[i][1-j]:                    
+                        nextGroups[i][1-j].append(ind)
+                    
+                    elif geno == genotypes[1-i][1-j]:                    
+                        nextGroups[1-i][1-j].append(ind)
 
-                else: # To account for genotyping error.
-                    nextGroups[i][j].append(ind)
+                    else: # To account for genotyping error.
+                        nextGroups[i][j].append(ind)
 
 def getOptions(genotype):
     if genotype == 0:
@@ -160,9 +181,9 @@ def getHetLoci(target, alt):
     while locus < 0 and i < (nLoci/2 + 1):
         forward = min(nLoci - 1, midpoint + i) 
         backward = max(0, midpoint - i) 
-        if target.genotypes[forward] == 1 and alt.genotypes[forward] != 1:
+        if target.genotypes[forward] == 1 and alt.genotypes[forward] != 1 and alt.genotypes[forward] != 9:
             locus = forward
-        if target.genotypes[backward] == 1 and alt.genotypes[backward] != 1:
+        if target.genotypes[backward] == 1 and alt.genotypes[backward] != 1 and alt.genotypes[forward] != 9:
             locus = backward
         i += 1
 
