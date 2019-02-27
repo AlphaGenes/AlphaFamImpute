@@ -74,6 +74,11 @@ def phaseParentsViaSegregationGroups(sire, dam, children):
     for child in children:
         paternal = child.haplotypes[0][sireStart]
         maternal = child.haplotypes[1][damStart] #This may be odd if the child is missing here.
+        if paternal == 9:
+            paternal = np.random.randint(2)
+        if maternal == 9:
+            paternal = np.random.randint(2)
+
         groups[midpoint][paternal][maternal].append(child) #I'm just going to append the child... for reasons.
 
     # STEP 3: Progress across the chromosome and figure out how the groups change over time.
@@ -176,7 +181,7 @@ def evaluatePair(pair, currentGroups, loci):
 def getHetLoci(target, alt):
     nLoci = len(target.genotypes)
     midpoint = math.floor(nLoci/2)
-    locus = -1
+    locus = midpoint
     i = 0
     while locus < 0 and i < (nLoci/2 + 1):
         forward = min(nLoci - 1, midpoint + i) 
