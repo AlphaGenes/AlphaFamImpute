@@ -46,16 +46,20 @@ write.table2(pedigree, "pedigree.txt")
 write.table2(cbind(pedigree[,1], genotypes), "trueGenotypes.txt")
 write.table2(cbind(rep(pedigree[,1], each = 2), haplotypes), "truePhase.txt")
 
-write.table2(cbind(rep(pedigree[,1], each = 2), haplotypes)[1:4,], "truePhase_parents.txt")
-
 # Grab last ~ 80 individuals.
 maskedGenotypes = genotypes
 
-ldInd = c(1, 2, 6:102)
+errors = which(rbinom(length(maskedGenotypes), 1, .015) == 1)
+newGenotype = sample(c(0, 1, 2), length(errors), replace =T)
+maskedGenotypes[errors] = newGenotype
 
-ldLoci = seq(1, 1000, by = 5)
+ldInd = c(1:2, 6:102)
+
+ldLoci = seq(1, 1000, by = 20)
 maskedLoci = setdiff(1:1000, ldLoci)
 maskedGenotypes[ldInd, maskedLoci] = 9
+
+
 
 write.table2(cbind(pedigree[,1], maskedGenotypes), "genotypes.txt")
 

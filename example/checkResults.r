@@ -1,7 +1,15 @@
-output = as.matrix(read.table("out.dosages"))
-output_pa = as.matrix(read.table("parent_average.dosages"))
-output_phased = as.matrix(read.table("phased.dosages"))
+# output = as.matrix(read.table("out.dosages"))
+# output_pa = as.matrix(read.table("parent_average.dosages"))
+# output_phased = as.matrix(read.table("phased.dosages"))
 target = as.matrix(read.table("example/trueGenotypes.txt"))
+
+getAccuracyFast = function(target, fileName){
+    mat = as.matrix(read.table(fileName))
+    values = getAccuracy(target, mat)
+    print(fileName)
+    print(values)
+    print(" ")
+}
 
 getAccuracy = function(target, mat){
     #Only calculates on the last 80 individuals (these are all low-density offspring)
@@ -17,13 +25,7 @@ getAccuracy = function(target, mat){
 }
 
 
-acc = getAccuracy(target, output)
-acc_pa = getAccuracy(target, output_pa)
-acc_phased = getAccuracy(target, output_phased)
-
-# > acc
-# [1] 0.9933754 0.9798414
-# > acc_phased
-# [1] 0.9991943 0.9964859
-# > acc_pa #The marker-wise accuracy is broken -- all of the children are the same so all of the values are NA.
-# [1] 0.899912 1.000000
+getAccuracyFast(target, "example/out.dosages")
+getAccuracyFast(target, "example/parent_average.dosages")
+getAccuracyFast(target, "example/phased.dosages")
+getAccuracyFast(target, "example/em.dosages")

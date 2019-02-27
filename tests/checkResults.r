@@ -1,5 +1,5 @@
 output = as.matrix(read.table("out.dosages"))
-target = as.matrix(read.table("example/trueGenotypes.txt"))
+target = as.matrix(read.table("trueGenotypes.txt"))
 
 indAcc = sapply(23:102, function(i) {
             return(cor(output[i, -1], target[i, -1]))

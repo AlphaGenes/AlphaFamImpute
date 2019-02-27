@@ -2,6 +2,7 @@ from tinyhouse import Pedigree
 from tinyhouse import InputOutput
 from FamilyImputation import FamilyImputation
 from FamilyImputation import FamilySingleLocusPeeling
+from FamilyImputation import FamilyEM
 import numpy as np
 import argparse
 
@@ -21,6 +22,7 @@ def getArgs() :
 
     famParser.add_argument('-extphase', action='store_true', required=False, help='Include when using an external phase file for the parents. Skips the fullsib phase algorithm and just runs the HMM.')
     famParser.add_argument('-parentaverage', action='store_true', required=False, help='Include to impute based on parent average genotype. This runs single locus peeling on the parents to fill in any missing genotypes, then peels down to each offspring.')
+    famParser.add_argument('-em', action='store_true', required=False, help='Include to impute based on parent average genotype. This runs single locus peeling on the parents to fill in any missing genotypes, then peels down to each offspring.')
 
     return InputOutput.parseArgs("AlphaFamImpute", parser)
 
@@ -36,6 +38,8 @@ def main():
             FamilyImputation.imputeFamFromPhasedParents(fam, pedigree)
         elif args.parentaverage:
             FamilySingleLocusPeeling.imputeFamFromParentAverage(fam, pedigree)
+        elif args.em:
+            FamilyEM.imputeFamUsingFullSibs(fam, pedigree)
         else:
             FamilyImputation.imputeFamUsingFullSibs(fam, pedigree)
 
