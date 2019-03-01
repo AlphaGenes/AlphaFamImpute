@@ -41,12 +41,12 @@ indexes = do.call("c", indexes)
 haplotypes = haplotypes[indexes,]
 
 pedigree[1:2, 2:3] = 0
-write.table2(pedigree, "pedigree.txt")
+write.table2(pedigree, "basedata/pedigree.txt")
 
-write.table2(cbind(pedigree[,1], genotypes), "trueGenotypes.txt")
-write.table2(cbind(rep(pedigree[,1], each = 2), haplotypes), "truePhase.txt")
+write.table2(cbind(pedigree[,1], genotypes), "basedata/trueGenotypes.txt")
+write.table2(cbind(rep(pedigree[,1], each = 2), haplotypes), "basedata/truePhase.txt")
 
-write.table2(cbind(rep(pedigree[,1], each = 2), haplotypes)[1:4,], "truePhase_parents.txt")
+write.table2(cbind(rep(pedigree[,1], each = 2), haplotypes)[1:4,], "basedata/truePhase_parents.txt")
 
 # Grab last ~ 80 individuals.
 maskedGenotypes = genotypes
@@ -57,5 +57,5 @@ ldLoci = seq(1, 1000, by = 5)
 maskedLoci = setdiff(1:1000, ldLoci)
 maskedGenotypes[ldInd, maskedLoci] = 9
 
-write.table2(cbind(pedigree[,1], maskedGenotypes), "genotypes.txt")
+write.table2(cbind(pedigree[,1], maskedGenotypes), "basedata/genotypes.txt")
 
