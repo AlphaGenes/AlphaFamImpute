@@ -1,6 +1,6 @@
-from tinyhouse import HaplotypeOperations
-from tinyhouse import BasicHMM
-from tinyhouse import ProbMath
+from ..tinyhouse import HaplotypeOperations
+from ..tinyhouse import BasicHMM
+from ..tinyhouse import ProbMath
 import math
 
 import numpy as np

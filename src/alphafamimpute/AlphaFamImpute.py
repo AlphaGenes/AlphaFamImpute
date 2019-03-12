@@ -1,8 +1,8 @@
-from tinyhouse import Pedigree
-from tinyhouse import InputOutput
-from FamilyImputation import FamilyImputation
-from FamilyImputation import FamilySingleLocusPeeling
-from FamilyImputation import FamilyEM
+from .tinyhouse import Pedigree
+from .tinyhouse import InputOutput
+from .FamilyImputation import FamilyImputation
+from .FamilyImputation import FamilySingleLocusPeeling
+from .FamilyImputation import FamilyEM
 import numpy as np
 import argparse
 
