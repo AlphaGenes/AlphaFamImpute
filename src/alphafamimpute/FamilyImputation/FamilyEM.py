@@ -8,7 +8,7 @@ import numpy as np
 from numba import jit, njit
 import math
 
-def imputeFamUsingFullSibs(fam, pedigree) :
+def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
 
     #Pipeline:
     # 0) Get LD and HD children.
@@ -17,10 +17,12 @@ def imputeFamUsingFullSibs(fam, pedigree) :
 
     # STEP 0: Get LD and HD children.
     nLoci = len(fam.sire.genotypes)
-
-    ldChildren = [off for off in fam.offspring if off.getPercentMissing() > .1]
-    hdChildren = [off for off in fam.offspring if off.getPercentMissing() <= .1]
-
+    if not gbs :
+        ldChildren = [off for off in fam.offspring if off.getPercentMissing() > .1]
+        hdChildren = [off for off in fam.offspring if off.getPercentMissing() <= .1]
+    if gbs:
+        ldChildren = fam.offspring
+        hdChildren = fam.offspring
     # childDosages is here to store the children's dosages to prevent them from being over-written.
     childDosages = np.full((len(ldChildren), nLoci), 0, dtype = np.float32)
 
@@ -35,6 +37,7 @@ def imputeFamUsingFullSibs(fam, pedigree) :
     childDosages /= nIterations
     for i, child in enumerate(ldChildren):
         child.dosages = childDosages[i,:]
+
 
 def runImputationRound(fam, ldChildren, hdChildren) :
     #STEP 1: Take all of the HD children and phase/(impute?) the parents.
