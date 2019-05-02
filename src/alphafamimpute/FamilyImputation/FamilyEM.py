@@ -113,10 +113,10 @@ def estimateSegregation(segregation, genotypeProbabilities, sireHaplotypes, damH
                 p1 = sireHaplotypes[sireHap, i]
                 p2 = damHaplotypes[damHap, i]
 
-                p_aa = genotypeProbabilities[i, 0]
-                p_aA = genotypeProbabilities[i, 1] 
-                p_Aa = genotypeProbabilities[i, 2]
-                p_AA = genotypeProbabilities[i, 3]
+                p_aa = genotypeProbabilities[0, i]
+                p_aA = genotypeProbabilities[1, i] 
+                p_Aa = genotypeProbabilities[2, i]
+                p_AA = genotypeProbabilities[3, i]
 
                 # I am reasonable certain that this is right.
                 # p(aa | inheriting sireHap + damHap) = (1-p1)*(1-p2)
