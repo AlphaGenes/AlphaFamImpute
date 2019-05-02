@@ -8,7 +8,6 @@ import numpy as np
 from numba import jit, njit
 import math
 
-@profile
 def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
 
     #Pipeline:
@@ -40,7 +39,6 @@ def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
         child.dosages = childDosages[i,:]
 
 
-@profile
 def runImputationRound(fam, ldChildren, hdChildren) :
     #STEP 1: Take all of the HD children and phase/(impute?) the parents.
 
@@ -61,7 +59,6 @@ def runImputationRound(fam, ldChildren, hdChildren) :
         BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False)
 
 
-@profile
 def phaseParentsViaEM(sire, dam, children):
     # Pipeline:
     # 0) Initialize founder haplotypes. 
