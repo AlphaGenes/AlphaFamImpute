@@ -8,6 +8,7 @@ import numpy as np
 from numba import jit, njit
 import math
 
+@profile
 def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
 
     #Pipeline:
@@ -39,6 +40,7 @@ def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
         child.dosages = childDosages[i,:]
 
 
+@profile
 def runImputationRound(fam, ldChildren, hdChildren) :
     #STEP 1: Take all of the HD children and phase/(impute?) the parents.
 
@@ -59,6 +61,7 @@ def runImputationRound(fam, ldChildren, hdChildren) :
         BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False)
 
 
+@profile
 def phaseParentsViaEM(sire, dam, children):
     # Pipeline:
     # 0) Initialize founder haplotypes. 
@@ -144,14 +147,21 @@ def estimateFounders(segregations, genotypeProbabilities, sireHaplotypes, damHap
     damHaplotypes_new = np.full((2, nLoci), 0.1, dtype = np.float32)
     damHaplotypes_new_counts = np.full((2, nLoci), 0.2, dtype = np.float32)
 
+    values = np.full(4, 0, dtype = np.float32)
+
+
     # Sire update:
     for i in range(nLoci):
         p1 = sireHaplotypes[0,i]
         p2 = sireHaplotypes[1,i]
 
         # This is probably a speed bottleneck
-        values = np.array([(1-p1)*(1-p2), (1-p1)*p2, p1*(1-p2), p1*p2], dtype = np.float32) * sire_genotypeProbabilities[:,i]
-        values = values/np.sum(values)
+        values[0]= sire_genotypeProbabilities[0,i] * (1-p1)*(1-p2)
+        values[1]= sire_genotypeProbabilities[1,i] * (1-p1)*p2
+        values[2]= sire_genotypeProbabilities[2,i] * p1*(1-p2)
+        values[3]= sire_genotypeProbabilities[3,i] * p1*p2
+        norm_1D(values)
+
         sire_dosage = values[2] + values[3] # This is the expected allele value they recieved from their sire.
         dam_dosage = values[1] + values[3] # This is the expected allele value they recieved from their dam.
         sireHaplotypes_new[0, i] += sire_dosage
@@ -164,8 +174,11 @@ def estimateFounders(segregations, genotypeProbabilities, sireHaplotypes, damHap
     for i in range(nLoci):
         p1 = damHaplotypes[0,i]
         p2 = damHaplotypes[1,i]
-        values = np.array([(1-p1)*(1-p2), (1-p1)*p2, p1*(1-p2), p1*p2], dtype = np.float32) * dam_genotypeProbabilities[:,i]
-        values = values/np.sum(values)
+        values[0]= dam_genotypeProbabilities[0,i] * (1-p1)*(1-p2)
+        values[1]= dam_genotypeProbabilities[1,i] * (1-p1)*p2
+        values[2]= dam_genotypeProbabilities[2,i] * p1*(1-p2)
+        values[3]= dam_genotypeProbabilities[3,i] * p1*p2
+        norm_1D(values)
         sire_dosage = values[2] + values[3]
         dam_dosage = values[1] + values[3]
         damHaplotypes_new[0, i] += sire_dosage
@@ -174,17 +187,30 @@ def estimateFounders(segregations, genotypeProbabilities, sireHaplotypes, damHap
         damHaplotypes_new[1, i] += dam_dosage
         damHaplotypes_new_counts[1, i] += 1
 
+    valueArray = np.full((2, 2, nLoci, 4), 0, dtype = np.float32)
+    for i in range(nLoci):
+        for sireHap in range(2):
+            for damHap in range(2):
+                p1 = sireHaplotypes[sireHap,i]
+                p2 = damHaplotypes[damHap,i]
+
+                # This produces the genotype probabilities for an offspring, conditional on having a given haplotype.
+                valueArray[sireHap, damHap, i, 0] = (1-p1)*(1-p2)
+                valueArray[sireHap, damHap, i, 1] = (1-p1)*p2
+                valueArray[sireHap, damHap, i, 2] = p1*(1-p2)
+                valueArray[sireHap, damHap, i, 3] = p1*p2
+
     for child in range(nChildren):
         for i in range(nLoci):
             for sireHap in range(2):
                 for damHap in range(2):
                     # Flag: This may be a place where we are playing too fast and loose with a normalization constant.
-                    p1 = sireHaplotypes[sireHap,i]
-                    p2 = damHaplotypes[damHap,i]
+                    # p1 = sireHaplotypes[sireHap,i]
+                    # p2 = damHaplotypes[damHap,i]
+                    for j in range(4):
+                        values[j] = valueArray[sireHap, damHap, i, j] * genotypeProbabilities[child,j, i]
+                    norm_1D(values)
 
-                    # This produces the genotype probabilities for an offspring, conditional on having a given haplotype.
-                    values = np.array([(1-p1)*(1-p2), (1-p1)*p2, p1*(1-p2), p1*p2], dtype = np.float32) * genotypeProbabilities[child,:,i]
-                    values = values/np.sum(values)
                     sire_dosage = values[2] + values[3]
                     dam_dosage = values[1] + values[3]
 
@@ -196,38 +222,47 @@ def estimateFounders(segregations, genotypeProbabilities, sireHaplotypes, damHap
 
     return sireHaplotypes_new/sireHaplotypes_new_counts, damHaplotypes_new/damHaplotypes_new_counts
 
-
-def imputeIndividual(ind, sireHaplotypes, damHaplotypes):
-    nLoci = len(sireHaplotypes[0])
-    # Take an individual, get their genotype probabilities. 
-    genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(ind)
-
-    # Use the genotype probabilities to generate segregation estimates.
-    segregation = np.full((2, 2, nLoci), 0, dtype = np.float32) 
-    estimateSegregation(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes)
-
-    # Use the segregation estimates to re-estimate the individuals genotypes and turn that into dosages.
-    ind.dosages = getDosages(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes)
-
 @njit
-def getDosages(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes):
-    tmp, nLoci = genotypeProbabilities.shape
-    dosages = np.full(nLoci, 0, dtype = np.float32)
-    for i in range(nLoci):
-        for sireHap in range(2):
-            for damHap in range(2):
-                # Flag: This may be a place where we are playing too fast and loose with a normalization constant.
-                p1 = sireHaplotypes[sireHap,i]
-                p2 = damHaplotypes[damHap,i]
-                # Do we really want the genotype probabilities in here as well? Isn't there a worry that we're using them to construct the likely inherited haplotypes, and using them again to get the genotypes?
-                # Maybe. But there's probably also value, particularly if the haplotypes were all close to .5? (but this doesn't happen since we call them?)
-                # Sire and dam haplotypes are also 0 or 1 here, no?
-                # This could probably be improved. Particularly since the genotype probabilities are already likely missing for a lot of loci. Will see if this is an issue.
-                values = np.array([(1-p1)*(1-p2), (1-p1)*p2, p1*(1-p2), p1*p2], dtype = np.float32) * genotypeProbabilities[:,i]
-                values = values/np.sum(values)
-                dosage = values[1] + values[2] + 2*values[3]
-                dosages[i] += dosage * segregation[sireHap, damHap, i]
-    return dosages
+def norm_1D(vect):
+    count = 0
+    for i in range(len(vect)):
+        count += vect[i]
+    for i in range(len(vect)):
+        vect[i] /= count
+
+
+# @profile
+# def imputeIndividual(ind, sireHaplotypes, damHaplotypes):
+#     nLoci = len(sireHaplotypes[0])
+#     # Take an individual, get their genotype probabilities. 
+#     genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(ind)
+
+#     # Use the genotype probabilities to generate segregation estimates.
+#     segregation = np.full((2, 2, nLoci), 0, dtype = np.float32) 
+#     estimateSegregation(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes)
+
+#     # Use the segregation estimates to re-estimate the individuals genotypes and turn that into dosages.
+#     ind.dosages = getDosages(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes)
+
+# @njit
+# def getDosages(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes):
+#     tmp, nLoci = genotypeProbabilities.shape
+#     dosages = np.full(nLoci, 0, dtype = np.float32)
+#     for i in range(nLoci):
+#         for sireHap in range(2):
+#             for damHap in range(2):
+#                 # Flag: This may be a place where we are playing too fast and loose with a normalization constant.
+#                 p1 = sireHaplotypes[sireHap,i]
+#                 p2 = damHaplotypes[damHap,i]
+#                 # Do we really want the genotype probabilities in here as well? Isn't there a worry that we're using them to construct the likely inherited haplotypes, and using them again to get the genotypes?
+#                 # Maybe. But there's probably also value, particularly if the haplotypes were all close to .5? (but this doesn't happen since we call them?)
+#                 # Sire and dam haplotypes are also 0 or 1 here, no?
+#                 # This could probably be improved. Particularly since the genotype probabilities are already likely missing for a lot of loci. Will see if this is an issue.
+#                 values = np.array([(1-p1)*(1-p2), (1-p1)*p2, p1*(1-p2), p1*p2], dtype = np.float32) * genotypeProbabilities[:,i]
+#                 values = values/np.sum(values)
+#                 dosage = values[1] + values[2] + 2*values[3]
+#                 dosages[i] += dosage * segregation[sireHap, damHap, i]
+#     return dosages
 
 
 
