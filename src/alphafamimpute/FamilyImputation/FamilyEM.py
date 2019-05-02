@@ -53,7 +53,7 @@ def runImputationRound(fam, ldChildren, hdChildren) :
 
     for child in ldChildren:
         # imputeIndividual(child, np.round(sireHaplotypes), np.round(damHaplotypes))
-        BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci)
+        BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False)
 
 
 def phaseParentsViaEM(sire, dam, children):
@@ -225,43 +225,6 @@ def getDosages(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes
                 dosage = values[1] + values[2] + 2*values[3]
                 dosages[i] += dosage * segregation[sireHap, damHap, i]
     return dosages
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

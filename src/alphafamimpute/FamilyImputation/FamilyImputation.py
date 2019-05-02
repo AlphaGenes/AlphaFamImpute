@@ -13,7 +13,7 @@ def imputeFamFromPhasedParents(fam, pedigree) :
     # STEP 1: Take all of the LD children and impute from the parents.
     nLoci = len(fam.sire.genotypes)
     for child in fam.offspring:
-        BasicHMM.diploidHMM(child, fam.sire.haplotypes, fam.dam.haplotypes, 0.01, 1.0/nLoci)
+        BasicHMM.diploidHMM(child, fam.sire.haplotypes, fam.dam.haplotypes, 0.01, 1.0/nLoci, useCalledHaps = False)
 
 def imputeFamUsingFullSibs(fam, pedigree) :
 

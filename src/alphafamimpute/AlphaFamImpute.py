@@ -23,6 +23,7 @@ def getArgs() :
     famParser.add_argument('-extphase', action='store_true', required=False, help='Include when using an external phase file for the parents. Skips the fullsib phase algorithm and just runs the HMM.')
     famParser.add_argument('-parentaverage', action='store_true', required=False, help='Include to impute based on parent average genotype. This runs single locus peeling on the parents to fill in any missing genotypes, then peels down to each offspring.')
     famParser.add_argument('-em', action='store_true', required=False, help='Include to impute based on parent average genotype. This runs single locus peeling on the parents to fill in any missing genotypes, then peels down to each offspring.')
+    # famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to do some more fully probibilistic calculations for gbs data.')
 
     return InputOutput.parseArgs("AlphaFamImpute", parser)
 
