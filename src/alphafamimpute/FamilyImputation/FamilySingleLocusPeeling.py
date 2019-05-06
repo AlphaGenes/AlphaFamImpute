@@ -56,6 +56,52 @@ def imputeFamFromParentAverage(fam, pedigree) :
 
         child.dosages = np.dot(np.array([0,1,1,2]), child_combined)
 
+def getParentalGenotypesWithChildren(sire, dam, offspring) : 
+
+    # Pipeline:
+    # 0) We need a segregation tensor.
+    # 1) Take all of the children, find the projection of the children up to the parents.
+    # 2) Take the parents, and find the joint genotype probabilities.
+
+    # 3) Combine the joint genotype probabilities of the children + parents, and impute back down to the children.
+
+    # STEP 0) We need a segregation tensor.
+
+    segregation = ProbMath.generateSegregation(partial = True) #Using the partial matrix since we aren't using segregation estimates.
+
+    
+    # STEP 1) Take all of the children, find the projection of the children up to the parents.
+
+    childGenoProbs = []
+    for child in offspring:
+        childGenoProbs.append(ProbMath.getGenotypeProbabilities_ind(child))
+
+    projectedGenotypes = []
+    allProjected = None
+    for i, child in enumerate(offspring):
+        projectedGenotypes.append(logPeelUp(childGenoProbs[i], segregation))
+        if allProjected is None:
+            allProjected = projectedGenotypes[i].copy()
+        else:
+            allProjected += projectedGenotypes[i]
+
+    
+    # STEP 2) Take the parents, and find the joint genotype probabilities.
+    
+    sireGenoProbs = ProbMath.getGenotypeProbabilities_ind(sire)
+    damGenoProbs = ProbMath.getGenotypeProbabilities_ind(dam)
+    jointParents = np.log(np.einsum("ai, bi -> abi", sireGenoProbs, damGenoProbs))
+
+
+    # 3) Combine the joint genotype probabilities of the children + parents, and impute back down to the children.
+    jointParents_combined = jointParents + allProjected
+    jointParents_combined = exp_norm(jointParents_combined)
+    jointParents_combined /= np.sum(jointParents_combined, (0,1))
+
+    new_sireGenoProbs = np.einsum("abi -> ai", jointParents_combined)
+    new_damGenoProbs = np.einsum("abi -> bi", jointParents_combined)
+
+    return new_sireGenoProbs, new_damGenoProbs
 
 @jit(nopython=True)
 def exp_norm(mat):

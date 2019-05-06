@@ -1,6 +1,8 @@
 from ..tinyhouse import HaplotypeOperations
 from ..tinyhouse import BasicHMM
 from ..tinyhouse import ProbMath
+from ..tinyhouse import InputOutput
+from . import FamilySingleLocusPeeling
 import math
 
 import numpy as np
@@ -8,7 +10,7 @@ import numpy as np
 from numba import jit, njit
 import math
 
-def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
+def imputeFamUsingFullSibs(fam, pedigree, args) :
 
     #Pipeline:
     # 0) Get LD and HD children.
@@ -17,32 +19,48 @@ def imputeFamUsingFullSibs(fam, pedigree, gbs = False) :
 
     # STEP 0: Get LD and HD children.
     nLoci = len(fam.sire.genotypes)
-    if not gbs :
+    if not args.gbs :
         ldChildren = [off for off in fam.offspring if off.getPercentMissing() > .1]
         hdChildren = [off for off in fam.offspring if off.getPercentMissing() <= .1]
-    if gbs:
+    if args.gbs:
         ldChildren = fam.offspring
         hdChildren = fam.offspring
-    # childDosages is here to store the children's dosages to prevent them from being over-written.
-    childDosages = np.full((len(ldChildren), nLoci), 0, dtype = np.float32)
 
     # Let's impute everyone.
     # Need to think about this.
-    nIterations = 10
-    for cycle in range(nIterations) :
-         runImputationRound(fam, ldChildren, hdChildren)
-         for i, child in enumerate(ldChildren):
-            childDosages[i,:] += child.dosages
 
-    childDosages /= nIterations
-    for i, child in enumerate(ldChildren):
-        child.dosages = childDosages[i,:]
+    if not args.usegenoprobs:
+        # childDosages is here to store the children's dosages to prevent them from being over-written.
+        childDosages = np.full((len(ldChildren), nLoci), 0, dtype = np.float32)
+
+        nIterations = args.niter
+        for cycle in range(nIterations) :
+             runImputationRound(fam, ldChildren, hdChildren, callingMethod = "dosages", preimpute = args.preimpute)
+             for i, child in enumerate(ldChildren):
+                childDosages[i,:] += child.dosages
+
+        childDosages /= nIterations
+        for i, child in enumerate(ldChildren):
+            child.dosages = childDosages[i,:]
+
+    if args.usegenoprobs:
+        childGenoProbs = np.full((len(ldChildren), 4, nLoci), 0, dtype = np.float32)
+
+        nIterations = args.niter
+        for cycle in range(nIterations) :
+             runImputationRound(fam, ldChildren, hdChildren, callingMethod = "probabilities", preimpute = args.preimpute)
+             for i, child in enumerate(ldChildren):
+                childGenoProbs[i,:,:] += child.info # Child genotype probabilities get passed to info.
+
+        childGenoProbs /= nIterations
+        for i, child in enumerate(ldChildren):
+            child.dosages = combineAndConvertToDosage(childGenoProbs[i,:,:], ProbMath.getGenotypeProbabilities_ind(child))
 
 
-def runImputationRound(fam, ldChildren, hdChildren) :
+def runImputationRound(fam, ldChildren, hdChildren, callingMethod = "dosages", preimpute = False) :
     #STEP 1: Take all of the HD children and phase/(impute?) the parents.
 
-    sireHaplotypes, damHaplotypes = phaseParentsViaEM(fam.sire, fam.dam, hdChildren)
+    sireHaplotypes, damHaplotypes = phaseParentsViaEM(fam.sire, fam.dam, hdChildren, preimpute = preimpute)
 
     # Just re-align the parents to get imputed genotypes from them on the output.
     # This got taken out because we run the peeling cycle multiple times. Probably should just do something with the dosages.
@@ -56,20 +74,27 @@ def runImputationRound(fam, ldChildren, hdChildren) :
 
     for child in ldChildren:
         # imputeIndividual(child, np.round(sireHaplotypes), np.round(damHaplotypes))
-        BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False)
+        BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = callingMethod)
 
 
-def phaseParentsViaEM(sire, dam, children):
+def phaseParentsViaEM(sire, dam, children, preimpute = False):
+    args = InputOutput.args
+
     # Pipeline:
     # 0) Initialize founder haplotypes. 
 
-    sire_genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(sire)
-    dam_genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(dam)
+    if preimpute:
+        sire_genotypeProbabilities, dam_genotypeProbabilities = FamilySingleLocusPeeling.getParentalGenotypesWithChildren(sire, dam, children)
+    else:
+        sire_genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(sire)
+        dam_genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(dam)
 
     nLoci = sire_genotypeProbabilities.shape[1]
 
     sireHaplotypes = np.full((2, nLoci), 0, dtype = np.float32)
     damHaplotypes = np.full((2, nLoci), 0, dtype = np.float32)
+
+    jitter = args.jitter
 
     sireHaplotypes[0,:] = sire_genotypeProbabilities[1,:] + sire_genotypeProbabilities[3,:] # Prob the sire is aA or AA
     sireHaplotypes[1,:] = sire_genotypeProbabilities[2,:] + sire_genotypeProbabilities[3,:] # Prob the sire is Aa or AA
@@ -78,12 +103,12 @@ def phaseParentsViaEM(sire, dam, children):
     damHaplotypes[1, :] = dam_genotypeProbabilities[2,:] + dam_genotypeProbabilities[3,:]
 
     # Add in some jitter for the haplotype assignements.
-    sireHaplotypes = (.7 * sireHaplotypes + 0.15) + (1 - 2*np.random.random(sireHaplotypes.shape)) * 0.1 # (0,1) -> (.15, .85) + random noise -> (.05, .95)
-    damHaplotypes =  (.7 * damHaplotypes + 0.15) + (1 - 2*np.random.random(damHaplotypes.shape)) * 0.1 # (0,1) -> (.15, .85) + random noise -> (.05, .95)
+    sireHaplotypes = ((1-jitter*2) * sireHaplotypes + jitter) + (1 - 2*np.random.random(sireHaplotypes.shape)) * 2/3*jitter # (0,1) -> (.15, .85) + random noise -> (.05, .95)
+    damHaplotypes =  ((1-jitter*2) * damHaplotypes + jitter) + (1 - 2*np.random.random(damHaplotypes.shape)) * 2/3*jitter # (0,1) -> (.15, .85) + random noise -> (.05, .95)
 
     nChildren = len(children)
 
-    nCycles = 100
+    nCycles = args.ncycles
 
     # Step 0b) Construct genotype probabilities for the children. Note: These are fixed for all the iterations.
     genotypeProbabilities = np.full((nChildren, 4, nLoci), 0, dtype = np.float32)
@@ -226,7 +251,26 @@ def norm_1D(vect):
         count += vect[i]
     for i in range(len(vect)):
         vect[i] /= count
+@njit
+def norm_1D_return(vect):
+    count = 0
+    for i in range(len(vect)):
+        count += vect[i]
+    for i in range(len(vect)):
+        vect[i] /= count
+    return vect
 
+def combineAndConvertToDosage(genoProb1, genoProb2) :
+    tmp, nLoci = genoProb1.shape
+    dosages = np.full(nLoci, 0, dtype = np.float32)
+
+    for i in range(nLoci):
+        vect1 = norm_1D_return(genoProb1[:, i])
+        vect2 = norm_1D_return(genoProb2[:, i])
+
+        combined = norm_1D_return(vect1 * vect2) # Not the fastest, but shrug.
+        dosages[i] = combined[1] + combined[2] + 2*combined[3]
+    return dosages
 
 # @profile
 # def imputeIndividual(ind, sireHaplotypes, damHaplotypes):
