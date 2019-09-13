@@ -74,172 +74,131 @@ def runImputationRound(fam, ldChildren, hdChildren, callingMethod = "dosages", p
         BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = callingMethod)
 
 
-def phaseParentsViaEM(sire, dam, children, preimpute = False):
-    args = InputOutput.args
-
-    # Pipeline:
-    # 0) Initialize founder haplotypes. 
-
-    if preimpute:
-        sire_genotypeProbabilities, dam_genotypeProbabilities = FamilySingleLocusPeeling.getParentalGenotypesWithChildren(sire, dam, children)
-    else:
-        sire_genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(sire)
-        dam_genotypeProbabilities = ProbMath.getGenotypeProbabilities_ind(dam)
-
-    nLoci = sire_genotypeProbabilities.shape[1]
-
-    sireHaplotypes = np.full((2, nLoci), 0, dtype = np.float32)
-    damHaplotypes = np.full((2, nLoci), 0, dtype = np.float32)
-
-    jitter = args.jitter
-
-    sireHaplotypes[0,:] = sire_genotypeProbabilities[1,:] + sire_genotypeProbabilities[3,:] # Prob the sire is aA or AA
-    sireHaplotypes[1,:] = sire_genotypeProbabilities[2,:] + sire_genotypeProbabilities[3,:] # Prob the sire is Aa or AA
-
-    damHaplotypes[0, :] = dam_genotypeProbabilities[1,:] + dam_genotypeProbabilities[3,:]
-    damHaplotypes[1, :] = dam_genotypeProbabilities[2,:] + dam_genotypeProbabilities[3,:]
-
-    # Add in some jitter for the haplotype assignements.
-    sireHaplotypes = ((1-jitter*2) * sireHaplotypes + jitter) + (1 - 2*np.random.random(sireHaplotypes.shape)) * 2/3*jitter # (0,1) -> (.15, .85) + random noise -> (.05, .95)
-    damHaplotypes =  ((1-jitter*2) * damHaplotypes + jitter) + (1 - 2*np.random.random(damHaplotypes.shape)) * 2/3*jitter # (0,1) -> (.15, .85) + random noise -> (.05, .95)
-
+def founderImputation(sire, dam, children, preimpute = False):
+    
     nChildren = len(children)
 
-    nCycles = args.ncycles
+    ref_reads = np.full((nChild, nLoci), 0, dtype = np.float32)
+    alt_reads = np.full((nChild, nLoci), 0, dtype = np.float32)
 
-    # Step 0b) Construct genotype probabilities for the children. Note: These are fixed for all the iterations.
-    genotypeProbabilities = np.full((nChildren, 4, nLoci), 0, dtype = np.float32)
-    for i, child in enumerate(children):
-        genotypeProbabilities[i,:,:] = ProbMath.getGenotypeProbabilities_ind(child)
+    for i in range(nChildren)
+        ref_reads[i,:] = children[i].reads[0]
+        alt_reads[i,:] = children[i].reads[1]
 
-    # Step 1 + 2: Estimate children based on parents. Estimate parents based on children. 
-    for i in range(nCycles):
-        # 1) Loop to perform haplotype assignments based on current haplotypes.
+    # The forward pass works in a couple of steps.
+    # Estimate p(y|h,x) for each loci.
+    # Use that estimate to calculate the parent estimate. g(h)
+    # Normalize the "a" estimate across parental haplotypes.
+
+    # Some notation. Each parent has four possible haplotypes, aa, aA, Aa, AA.
+    # The child as four inheritance patterns, mm, mp, pm, pp.
+    # We may be able to re-use some of the segregation archetecture.
+
+    child_point_estimates = np.full((nChildren, 4, 4, 4, nLoci), 0, dtype = np.float32) # Three dimensional array for each individual. First index is segregation, then father and mother's haplotypes.
     
-        segregations = np.full((nChildren, 2, 2, nLoci), 0, dtype = np.float32)
-        for i, child in enumerate(children):
-            estimateSegregation(segregations[i,:,:], genotypeProbabilities[i,:,:], sireHaplotypes, damHaplotypes)
+    for child in range(nChildren):
+        fill_child_point_estimate(child_point_estimates[child,:,:,:,:], ref_reads[child], alt_reads[child])
 
-        # 2) Loop to re-estimate the founder haplotypes based on assignements.
-            sireHaplotypes, damHaplotypes = estimateFounders(segregations, genotypeProbabilities, sireHaplotypes, damHaplotypes, sire_genotypeProbabilities, dam_genotypeProbabilities)
+    parent_point_estimates = np.full((4, 4, nLoci), 0, dtype = np.float32) # Sire and dam. For their four haplotype states.
+    fill_parent_point_estimate(parent_point_estimates, sire.reads[0], sire.reads[1], dam.reads[0], dam.reads[1])
 
-    return sireHaplotypes, damHaplotypes
+    perform_updates(child_point_estimates, parent_point_estimates)
 
-@njit
-def estimateSegregation(segregation, genotypeProbabilities, sireHaplotypes, damHaplotypes):
-    nLoci = segregation.shape[2]
-    pointEstimates = np.full((2, 2, nLoci), 0, dtype = np.float32) 
+def perform_updates(child_point_estimates, parent_point_estimates):
+    nChildren = child_point_estimates.shape[0]
+    nLoci = child_point_estimates.shape[4]
 
-    # Construct point estimates, by comparing sire + dam haplotypes.
-    for i in range(nLoci):
-        for sireHap in range(2):
-            for damHap in range(2):
-                # Flag: This may be a place where we are playing too fast and loose with a normalization constant.
-                p1 = sireHaplotypes[sireHap, i]
-                p2 = damHaplotypes[damHap, i]
+    # gamma step.
+    gamma = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
 
-                p_aa = genotypeProbabilities[0, i]
-                p_aA = genotypeProbabilities[1, i] 
-                p_Aa = genotypeProbabilities[2, i]
-                p_AA = genotypeProbabilities[3, i]
-
-                # I am reasonable certain that this is right.
-                # p(aa | inheriting sireHap + damHap) = (1-p1)*(1-p2)
-                # We are calculating p(aa | inheritance, data) = p(aa|data)*p(aa|inheritance).
-
-                score = p_aa*(1-p1)*(1-p2) + p_aA*(1-p1)*p2 + p_Aa*p1*(1-p2) + p_AA*p1*p2 
-                pointEstimates[sireHap, damHap, i] = score
-
-    recombinationRate = np.full(nLoci, 1.0/nLoci, dtype = np.float32)
-
-    # Run HMM on point estimates to get smoothed assignments.
-    segregation[:,:,:] = BasicHMM.diploidForwardBackward(pointEstimates, recombinationRate = recombinationRate)
-
-@njit
-def estimateFounders(segregations, genotypeProbabilities, sireHaplotypes, damHaplotypes, sire_genotypeProbabilities, dam_genotypeProbabilities):
-    nChildren, tmp, tmp2, nLoci = segregations.shape
-
-    # The .1 and .2 are weak priors.
-    sireHaplotypes_new = np.full((2, nLoci), 0.1, dtype = np.float32)
-    sireHaplotypes_new_counts = np.full((2, nLoci), 0.2, dtype = np.float32)
-
-    damHaplotypes_new = np.full((2, nLoci), 0.1, dtype = np.float32)
-    damHaplotypes_new_counts = np.full((2, nLoci), 0.2, dtype = np.float32)
-
-    values = np.full(4, 0, dtype = np.float32)
-
-
-    # Sire update:
-    for i in range(nLoci):
-        p1 = sireHaplotypes[0,i]
-        p2 = sireHaplotypes[1,i]
-
-        # This is probably a speed bottleneck
-        values[0]= sire_genotypeProbabilities[0,i] * (1-p1)*(1-p2)
-        values[1]= sire_genotypeProbabilities[1,i] * (1-p1)*p2
-        values[2]= sire_genotypeProbabilities[2,i] * p1*(1-p2)
-        values[3]= sire_genotypeProbabilities[3,i] * p1*p2
-        norm_1D(values)
-
-        sire_dosage = values[2] + values[3] # This is the expected allele value they recieved from their sire.
-        dam_dosage = values[1] + values[3] # This is the expected allele value they recieved from their dam.
-        sireHaplotypes_new[0, i] += sire_dosage
-        sireHaplotypes_new_counts[0, i] += 1
-
-        sireHaplotypes_new[1, i] += dam_dosage
-        sireHaplotypes_new_counts[1, i] += 1
-    
-    # Dam updates
-    for i in range(nLoci):
-        p1 = damHaplotypes[0,i]
-        p2 = damHaplotypes[1,i]
-        values[0]= dam_genotypeProbabilities[0,i] * (1-p1)*(1-p2)
-        values[1]= dam_genotypeProbabilities[1,i] * (1-p1)*p2
-        values[2]= dam_genotypeProbabilities[2,i] * p1*(1-p2)
-        values[3]= dam_genotypeProbabilities[3,i] * p1*p2
-        norm_1D(values)
-        sire_dosage = values[2] + values[3]
-        dam_dosage = values[1] + values[3]
-        damHaplotypes_new[0, i] += sire_dosage
-        damHaplotypes_new_counts[0, i] += 1
-
-        damHaplotypes_new[1, i] += dam_dosage
-        damHaplotypes_new_counts[1, i] += 1
-
-    valueArray = np.full((2, 2, nLoci, 4), 0, dtype = np.float32)
-    for i in range(nLoci):
-        for sireHap in range(2):
-            for damHap in range(2):
-                p1 = sireHaplotypes[sireHap,i]
-                p2 = damHaplotypes[damHap,i]
-
-                # This produces the genotype probabilities for an offspring, conditional on having a given haplotype.
-                valueArray[sireHap, damHap, i, 0] = (1-p1)*(1-p2)
-                valueArray[sireHap, damHap, i, 1] = (1-p1)*p2
-                valueArray[sireHap, damHap, i, 2] = p1*(1-p2)
-                valueArray[sireHap, damHap, i, 3] = p1*p2
+    gamma[:,:,0] = parents
+    for child in range(nChildren):
+        gamma[:,:,0] += log_sum_seg(child_point_estimates[child,:, :,:,0])
 
     for child in range(nChildren):
-        for i in range(nLoci):
-            for sireHap in range(2):
-                for damHap in range(2):
-                    # Flag: This may be a place where we are playing too fast and loose with a normalization constant.
-                    # p1 = sireHaplotypes[sireHap,i]
-                    # p2 = damHaplotypes[damHap,i]
-                    for j in range(4):
-                        values[j] = valueArray[sireHap, damHap, i, j] * genotypeProbabilities[child,j, i]
-                    norm_1D(values)
+        aNorm = aTilde[child, :, :, :, 0]/log_sum_seg(aTilde[child, :, :, :, 0])
 
-                    sire_dosage = values[2] + values[3]
-                    dam_dosage = values[1] + values[3]
 
-                    sireHaplotypes_new[sireHap, i] += segregations[child,sireHap,damHap,i]*sire_dosage
-                    sireHaplotypes_new_counts[sireHap, i] += segregations[child,sireHap,damHap,i]
+    for i in range(1, nLoci):
+        for child in range(nChildren):
+            aTilde[child, :,:,i] = child_point_estimates[child,:, :, :, i] + transmit(log_sum_geno(aNorm[child,:,:,:,i-1] + gamma[:, :, i-1]))
 
-                    damHaplotypes_new[damHap, i] += segregations[child,sireHap,damHap,i]*dam_dosage
-                    damHaplotypes_new_counts[damHap, i] += segregations[child,sireHap,damHap,i]
+        gamma[:,:,i] = parents
+        for child in range(nChildren):
+            gamma[:,:,i] += log_sum_seg(aTilde[child, :, :, :, 0])
 
-    return sireHaplotypes_new/sireHaplotypes_new_counts, damHaplotypes_new/damHaplotypes_new_counts
+
+        for child in range(nChildren):
+            aNorm = aTilde[child, :, :, :, i]/log_sum_seg(aTilde[child, :, :, :, i])
+
+
+@njit
+def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
+
+    for seg in range(4):
+        for sire in range(4):
+            for dam in range(4):
+                genotype = get_genotype(seg, sire, dam)
+                point_estimate[sire, dam,:] = get_genotype_probs(genotype, ref_reads, alt_reads)
+
+
+@njit
+def fill_parent_point_estimate(point_estimate, sire_ref, sire_alt, dam_ref, dam_alt) :
+    for sire in range(4):
+        sire_0, sire_1 = parse_genotype(parent_genotype)
+        sire_geno = sire_0 + sire_1
+
+        for dam in range(4):
+            dam_0, dam_1 = parse_genotype(parent_genotype)
+            dam_geno = dam_0 + dam_1
+
+            point_estimate[sire, dam,:] = get_genotype_probs(sire_geno, sire_ref, sire_alt)
+            point_estimate[sire, dam,:] += get_genotype_probs(dam_geno, dam_ref, dam_alt)
+
+
+@njit
+def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
+
+    for parent_genotype in range(4):
+        hap_0, hap_1 = parse_genotype(parent_genotype)
+        point_estimate[seg, sire, dam,:] = get_genotype_probs(hap_0+hap_1, ref_reads, alt_reads)
+
+
+@njit
+def get_genotype_probs(genotype, ref_reads, alt_reads):
+    loge = np.log(0.001)
+    log1e = np.log(1-0.001)
+    log2 = np.log(.5)
+
+    if genotype == 0: return ref_reads*log1e + alt_reads*loge
+    if genotype == 1: return ref_reads*log2 + alt_reads*log2
+    if genotype == 2: return ref_reads*log1e + alt_reads*loge
+
+
+@njit
+def get_genotype(seg, sire, dam):
+
+    seg_sire, seg_dam = parse_segregation(seg)
+
+    geno_sire = parse_genotype(sire)[seg_sire]
+    geno_dam = parse_genotype(sire)[seg_dam]
+
+    return geno_sire, geno_dam, geno_sire + geno_dam
+
+@njit
+def parse_genotype(geno):
+    if geno == 0: return (0, 0)
+    if geno == 1: return (0, 1)
+    if geno == 2: return (1, 0)
+    if geno == 3: return (1, 1)
+
+@njit
+def parse_segregation(seg):
+    if geno == 0: return (0, 0)
+    if geno == 1: return (0, 1)
+    if geno == 2: return (1, 0)
+    if geno == 3: return (1, 1)
+
 
 @njit
 def norm_1D(vect):
