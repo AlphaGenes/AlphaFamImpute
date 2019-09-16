@@ -19,69 +19,26 @@ def imputeFamUsingFullSibs(fam, pedigree, args) :
 
     # STEP 0: Get LD and HD children.
     nLoci = len(fam.sire.genotypes)
-    if not args.gbs :
-        ldChildren = [off for off in fam.offspring if off.getPercentMissing() > .1]
-        hdChildren = [off for off in fam.offspring if off.getPercentMissing() <= .1]
-    if args.gbs:
-        ldChildren = fam.offspring
-        hdChildren = fam.offspring
+    ldChildren = fam.offspring
+    hdChildren = fam.offspring
 
-    if not args.usegenoprobs:
-        # childDosages is here to store the children's dosages to prevent them from being over-written.
-        childDosages = np.full((len(ldChildren), nLoci), 0, dtype = np.float32)
-
-        nIterations = args.niter
-        for cycle in range(nIterations) :
-             runImputationRound(fam, ldChildren, hdChildren, callingMethod = "dosages", preimpute = args.preimpute)
-             for i, child in enumerate(ldChildren):
-                childDosages[i,:] += child.dosages
-
-        childDosages /= nIterations
-        for i, child in enumerate(ldChildren):
-            child.dosages = childDosages[i,:]
-
-    if args.usegenoprobs:
-        childGenoProbs = np.full((len(ldChildren), 4, nLoci), 0, dtype = np.float32)
-
-        nIterations = args.niter
-        for cycle in range(nIterations) :
-             runImputationRound(fam, ldChildren, hdChildren, callingMethod = "probabilities", preimpute = args.preimpute)
-             for i, child in enumerate(ldChildren):
-                childGenoProbs[i,:,:] += child.info # Child genotype probabilities get passed to info.
-
-        childGenoProbs /= nIterations
-        for i, child in enumerate(ldChildren):
-            child.dosages = combineAndConvertToDosage(childGenoProbs[i,:,:], ProbMath.getGenotypeProbabilities_ind(child))
-
+    runImputationRound(fam, ldChildren, hdChildren)
 
 def runImputationRound(fam, ldChildren, hdChildren, callingMethod = "dosages", preimpute = False) :
     #STEP 1: Take all of the HD children and phase/(impute?) the parents.
 
-    sireHaplotypes, damHaplotypes = phaseParentsViaEM(fam.sire, fam.dam, hdChildren, preimpute = preimpute)
+    founderImputation(fam.sire, fam.dam, hdChildren, preimpute = preimpute)
 
-    # Just re-align the parents to get imputed genotypes from them on the output.
-    # This got taken out because we run the peeling cycle multiple times. Probably should just do something with the dosages.
-    # for ind in [fam.sire, fam.dam]:
-    #     HaplotypeOperations.align_individual(ind)
-
-
-    #STEP 2: Take all of the LD children and impute from the parents.
-    nLoci = len(fam.sire.genotypes)
-    
-
-    for child in ldChildren:
-        # imputeIndividual(child, np.round(sireHaplotypes), np.round(damHaplotypes))
-        BasicHMM.diploidHMM(child, np.round(sireHaplotypes), np.round(damHaplotypes), 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = callingMethod)
 
 
 def founderImputation(sire, dam, children, preimpute = False):
     
     nChildren = len(children)
+    nLoci = len(sire.genotypes)
+    ref_reads = np.full((nChildren, nLoci), 0, dtype = np.float32)
+    alt_reads = np.full((nChildren, nLoci), 0, dtype = np.float32)
 
-    ref_reads = np.full((nChild, nLoci), 0, dtype = np.float32)
-    alt_reads = np.full((nChild, nLoci), 0, dtype = np.float32)
-
-    for i in range(nChildren)
+    for i in range(nChildren):
         ref_reads[i,:] = children[i].reads[0]
         alt_reads[i,:] = children[i].reads[1]
 
@@ -102,34 +59,283 @@ def founderImputation(sire, dam, children, preimpute = False):
     parent_point_estimates = np.full((4, 4, nLoci), 0, dtype = np.float32) # Sire and dam. For their four haplotype states.
     fill_parent_point_estimate(parent_point_estimates, sire.reads[0], sire.reads[1], dam.reads[0], dam.reads[1])
 
-    perform_updates(child_point_estimates, parent_point_estimates)
+    parent_haplotypes, child_haplotypes = perform_updates(child_point_estimates, parent_point_estimates)
 
+    sire.genotypes[:] =   parent_haplotypes[0,0,:] + parent_haplotypes[0,1,:] 
+    sire.haplotypes[0][:] = parent_haplotypes[0,0,:]
+    sire.haplotypes[1][:] = parent_haplotypes[0,1,:]
+
+
+    dam.genotypes[:] =   parent_haplotypes[1,0,:] + parent_haplotypes[1,1,:] 
+    dam.haplotypes[0][:] = parent_haplotypes[1,0,:]
+    dam.haplotypes[1][:] = parent_haplotypes[1,1,:]
+
+    for i in range(nChildren):
+        children[i].genotypes[:] = child_haplotypes[i,0,:] + child_haplotypes[i,1,:] 
+        children[i].haplotypes[0][:] = child_haplotypes[i,0,:]
+        children[i].haplotypes[1][:] = child_haplotypes[i,1,:]
+
+@njit
 def perform_updates(child_point_estimates, parent_point_estimates):
     nChildren = child_point_estimates.shape[0]
     nLoci = child_point_estimates.shape[4]
 
     # gamma step.
-    gamma = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
+    parent_estimate = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
 
-    gamma[:,:,0] = parents
+    aTilde = np.full(child_point_estimates.shape, 0, dtype = np.float32)
+    aNorm = np.full(child_point_estimates.shape, 0, dtype = np.float32)
+
+    
     for child in range(nChildren):
-        gamma[:,:,0] += log_sum_seg(child_point_estimates[child,:, :,:,0])
+        aTilde[child,:,:,:,0] = child_point_estimates[child,:,:,:,0]
+
+    parent_estimate[:,:,0] = parent_point_estimates[:,:,0]
+    for child in range(nChildren):
+        parent_estimate[:,:,0] += log_sum_seg(child_point_estimates[child,:,:,:,0])
+
 
     for child in range(nChildren):
-        aNorm = aTilde[child, :, :, :, 0]/log_sum_seg(aTilde[child, :, :, :, 0])
+        # Loop is for annoying numpy notation to make sure the right axes get added.
+        log_sum = log_sum_seg(aTilde[child, :, :, :, 0])
+        for seg in range(4):
+            aNorm[child, seg, :,:, 0] = aTilde[child, seg, :, :, 0] - log_sum[:,:]
 
 
     for i in range(1, nLoci):
         for child in range(nChildren):
-            aTilde[child, :,:,i] = child_point_estimates[child,:, :, :, i] + transmit(log_sum_geno(aNorm[child,:,:,:,i-1] + gamma[:, :, i-1]))
+            forward = combined_and_transmit(aNorm[child,:,:,:,i-1], parent_estimate[:, :, i-1])
+            # Loop is for annoying numpy notation to make sure the right axes get added.
+            for sire in range(4):
+                for dam in range(4):
+                    aTilde[child, :, sire, dam,i] = child_point_estimates[child,:, sire, dam, i] + forward[:]
 
-        gamma[:,:,i] = parents
+        parent_estimate[:,:,i] = parent_point_estimates[:,:,i]
         for child in range(nChildren):
-            gamma[:,:,i] += log_sum_seg(aTilde[child, :, :, :, 0])
+            parent_estimate[:,:,i] += log_sum_seg(aTilde[child, :, :, :, i])
 
 
         for child in range(nChildren):
-            aNorm = aTilde[child, :, :, :, i]/log_sum_seg(aTilde[child, :, :, :, i])
+            # Loop is for annoying numpy notation to make sure the right axes get added.
+            log_sum = log_sum_seg(aTilde[child, :, :, :, i])
+            for seg in range(4):
+                aNorm[child, seg, :,:, i] = aTilde[child, seg, :, :, i] - log_sum[:,:]
+
+    return maximization_pass(parent_estimate, aNorm)
+
+@njit
+def maximization_pass(parent_estimate, aNorm):
+    nChildren = aNorm.shape[0]
+    nLoci = aNorm.shape[-1]
+
+    parent_genotypes = np.full((2, nLoci), 9, dtype = np.int64) 
+    beta = np.full(aNorm.shape, 0, dtype = np.float32)
+
+
+    # Doing first index.
+
+    unraveled_index = np.argmax(parent_estimate[:,:,-1])  #At last loci.
+    sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,-1].shape)
+    parent_genotypes[0, nLoci -1] = sire_geno
+    parent_genotypes[1, nLoci -1] = dam_geno
+    
+    # print(parent_estimate[:,:,-1])
+    # print(unraveled_index)
+
+
+    child_seg = np.full((nChildren, nLoci), 9, dtype = np.int64)
+    for child in range(nChildren):
+        child_seg[child,-1] = np.argmax(aNorm[child, :, sire_geno, dam_geno, -1])
+
+    for i in range(nLoci -2, -1, -1):
+
+        # Set beta for each child.
+
+        for child in range(nChildren):
+            add_backwards_sample(aNorm[child,:,:,:,i], child_seg[child,i+1], beta[child, :, :, :, i]) # i+1 since we are including infromation from the loci we just sampled. 
+
+        # calculate Ht for the parents.
+
+        sire_score = parent_estimate[:, :, i]
+        for child in range(nChildren):
+            sire_score += log_sum_seg(beta[child, :, :, :, i])
+        
+        unraveled_index = np.argmax(sire_score)  #At last loci.
+        sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,i].shape)
+
+        parent_genotypes[0, i] = sire_geno
+        parent_genotypes[1, i] = dam_geno
+
+        # calculate xt for each child.
+
+        for child in range(nChildren):
+            child_seg[child,i] = np.argmax(beta[child, :, sire_geno, dam_geno, i])
+
+
+    parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
+    child_haplotypes = extract_child_haplotypes(child_seg, parent_genotypes)
+
+    return parent_haplotypes, child_haplotypes
+
+@njit
+def extract_parent_haplotypes(parent_genotypes):
+    nLoci = parent_genotypes.shape[-1]
+    parent_haplotypes = np.full((2, 2, nLoci), 9, dtype = np.int8)
+    for parent in range(2):
+        for i in range(nLoci):
+            parent_haplotypes[parent, 0, i], parent_haplotypes[parent, 1, i] = parse_genotype(parent_genotypes[parent, i])
+
+    return parent_haplotypes
+
+@njit
+def extract_child_haplotypes(child_seg, parent_genotypes):
+    nChildren = child_seg.shape[0]
+    nLoci = child_seg.shape[-1]
+    child_haplotypes = np.full((nChildren, 2, nLoci), 9, dtype = np.int8)
+
+    for child in range(nChildren):
+        extract_haplotype(child_seg[child,:], parent_genotypes, child_haplotypes[child, :, :] )
+
+    return child_haplotypes
+@njit
+def extract_haplotype(child_seg, parent_genotypes, output):
+    nLoci = child_seg.shape[0]
+    for i in range(nLoci):
+        seg = child_seg[i]
+        sire_geno = parent_genotypes[0, i]
+        dam_geno = parent_genotypes[1, i]
+        
+        seg_sire, seg_dam = parse_segregation(seg)
+
+        output[0, i] = parse_genotype(sire_geno)[seg_sire]
+        output[1, i] = parse_genotype(dam_geno)[seg_dam]
+
+
+
+
+@njit
+def numba_unravel(index, shape):
+    nx, ny = shape
+
+    x = index // ny
+    y = index % ny
+    return(x,y)
+@njit
+def add_backwards_sample(aNorm, seg, beta):
+
+    seg_matrix = np.log(get_transmitted_seg_matrix(seg))
+    for sire in range(4):
+        for dam in range(4):
+            beta[:, sire, dam] = aNorm[:,sire, dam] + seg
+
+
+@njit
+def combined_and_transmit(child_estimate, parent_estimate):
+
+    log_product = child_estimate + parent_estimate
+    prev = np.full(4, 0, dtype = np.float32)
+    output = np.full(4, 0, dtype = np.float32)
+
+    max_value = np.max(log_product)
+
+    for i in range(4):
+        prev[i] = np.sum(np.exp(log_product[i, :, :] - max_value))
+
+    prev = prev/np.sum(prev)
+
+    return(transmit(prev, output))
+
+
+@njit
+def get_transmitted_seg_matrix(seg):
+
+    prev = np.full(4, 0, dtype = np.float32)
+    output = np.full(4, 0, dtype = np.float32)
+
+    prev[seg] = 1
+    return(transmit(prev, output))
+
+
+@njit
+def transmit(vect, output):
+
+    e = 0.01
+    e2 = e**2
+    e1e = e*(1-e)
+    e2i = (1.0-e)**2
+
+    output[0] = e2*vect[3] + e1e*(vect[1] + vect[2]) + e2i*vect[0] 
+    output[1] = e2*vect[2] + e1e*(vect[0] + vect[3]) + e2i*vect[1] 
+    output[2] = e2*vect[1] + e1e*(vect[0] + vect[3]) + e2i*vect[2] 
+    output[3] = e2*vect[0] + e1e*(vect[1] + vect[2]) + e2i*vect[3] 
+
+    return output
+
+
+@njit
+def log_sum_seg(matrix) :
+    output = np.full((4,4), 0, dtype = np.float32)
+    for pat in range(4):
+        for mat in range(4):
+            # print(matrix[:, pat, mat], log_sum_exp_1D(matrix[:, pat, mat]))
+            output[pat, mat] = log_sum_exp_1D(matrix[:, pat, mat]) # Residual on parent genotypes.
+    return output
+
+
+@jit(nopython=True, nogil = True)
+def log_sum_exp_1D(mat):
+    log_exp_sum = 0
+    maxVal = 1
+    for a in range(4):
+        if mat[a] > maxVal or maxVal == 1:
+            maxVal = mat[a]
+
+    # Should flag for better numba-ness.
+    for a in range(4):
+        log_exp_sum += np.exp(mat[a] - maxVal)
+    
+    return np.log(log_exp_sum) + maxVal
+
+
+# @jit(nopython=True, nogil = True)
+# def log_sum_exp_2D(mat):
+#     log_exp_sum = 0
+#     max_val = 1
+#     for a in range(4):
+#         for b in range(4):
+#             if mat[a, b] > maxVal or maxVal == 1:
+#                 maxVal = mat[a, b]
+
+#     # Should flag for better numba-ness.
+#     for a in range(4):
+#         for b in range(4):
+#             log_exp_sum += np.exp(mat[a, b] - maxVal)
+
+#     return np.log(log_exp_sum) + maxVal
+
+
+
+@jit(nopython=True, nogil = True)
+def exp_1D_norm(mat):
+    # Matrix is 4: Output is to take the exponential of the matrix and normalize each locus. We need to make sure that there are not any overflow values.
+    # Note, this changes the matrix in place by a constant.
+    maxVal = 1 # Log of anything between 0-1 will be less than 0. Using 1 as a default.
+    for a in range(4):
+        if mat[a] > maxVal or maxVal == 1:
+            maxVal = mat[a]
+    for a in range(4):
+        mat[a] -= maxVal
+
+    # Should flag for better numba-ness.
+    tmp = np.full(4, 0, dtype = np.float32)
+    for a in range(4):
+        tmp[a] = np.exp(mat[a])
+
+    norm_1D(tmp)
+
+    return tmp
+
+
 
 
 @njit
@@ -138,30 +344,23 @@ def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
     for seg in range(4):
         for sire in range(4):
             for dam in range(4):
-                genotype = get_genotype(seg, sire, dam)
-                point_estimate[sire, dam,:] = get_genotype_probs(genotype, ref_reads, alt_reads)
+                genotype = get_genotype(seg, sire, dam)[2]
+                point_estimate[seg, sire, dam,:] = get_genotype_probs(genotype, ref_reads, alt_reads)
 
 
 @njit
 def fill_parent_point_estimate(point_estimate, sire_ref, sire_alt, dam_ref, dam_alt) :
     for sire in range(4):
-        sire_0, sire_1 = parse_genotype(parent_genotype)
+        sire_0, sire_1 = parse_genotype(sire)
         sire_geno = sire_0 + sire_1
 
         for dam in range(4):
-            dam_0, dam_1 = parse_genotype(parent_genotype)
+            dam_0, dam_1 = parse_genotype(dam)
             dam_geno = dam_0 + dam_1
 
             point_estimate[sire, dam,:] = get_genotype_probs(sire_geno, sire_ref, sire_alt)
             point_estimate[sire, dam,:] += get_genotype_probs(dam_geno, dam_ref, dam_alt)
 
-
-@njit
-def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
-
-    for parent_genotype in range(4):
-        hap_0, hap_1 = parse_genotype(parent_genotype)
-        point_estimate[seg, sire, dam,:] = get_genotype_probs(hap_0+hap_1, ref_reads, alt_reads)
 
 
 @njit
@@ -170,18 +369,18 @@ def get_genotype_probs(genotype, ref_reads, alt_reads):
     log1e = np.log(1-0.001)
     log2 = np.log(.5)
 
-    if genotype == 0: return ref_reads*log1e + alt_reads*loge
-    if genotype == 1: return ref_reads*log2 + alt_reads*log2
-    if genotype == 2: return ref_reads*log1e + alt_reads*loge
+    if genotype == 0: values = ref_reads*log1e + alt_reads*loge
+    if genotype == 1: values = log2*(ref_reads + alt_reads)
+    if genotype == 2: values = alt_reads*log1e + ref_reads*loge
 
-
+    return values.astype(np.float32)
 @njit
 def get_genotype(seg, sire, dam):
 
     seg_sire, seg_dam = parse_segregation(seg)
 
     geno_sire = parse_genotype(sire)[seg_sire]
-    geno_dam = parse_genotype(sire)[seg_dam]
+    geno_dam = parse_genotype(dam)[seg_dam]
 
     return geno_sire, geno_dam, geno_sire + geno_dam
 
@@ -194,10 +393,10 @@ def parse_genotype(geno):
 
 @njit
 def parse_segregation(seg):
-    if geno == 0: return (0, 0)
-    if geno == 1: return (0, 1)
-    if geno == 2: return (1, 0)
-    if geno == 3: return (1, 1)
+    if seg == 0: return (0, 0)
+    if seg == 1: return (0, 1)
+    if seg == 2: return (1, 0)
+    if seg == 3: return (1, 1)
 
 
 @njit

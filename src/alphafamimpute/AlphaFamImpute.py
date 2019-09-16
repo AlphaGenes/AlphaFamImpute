@@ -3,6 +3,7 @@ from .tinyhouse import InputOutput
 from .FamilyImputation import FamilyImputation
 from .FamilyImputation import FamilySingleLocusPeeling
 from .FamilyImputation import FamilyEM
+from .FamilyImputation import FamilyMagic
 import numpy as np
 import argparse
 
@@ -24,6 +25,7 @@ def getArgs() :
     famParser.add_argument('-parentaverage', action='store_true', required=False, help='Include to impute based on parent average genotype. This runs single locus peeling on the parents to fill in any missing genotypes, then peels down to each offspring.')
     famParser.add_argument('-em', action='store_true', required=False, help='Include to impute based on parent average genotype. This runs single locus peeling on the parents to fill in any missing genotypes, then peels down to each offspring.')
     famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to do some more fully probibilistic calculations for gbs data.')
+    famParser.add_argument('-magic', action='store_true', required=False, help='Flag to run the magic impute algorithm.')
     famParser.add_argument('-usegenoprobs', action='store_true', required=False, help=argparse.SUPPRESS) #help='Flag to use the individual\'s genotype probabilities for calculating dosages.')
     famParser.add_argument('-preimpute', action='store_true', required=False, help=argparse.SUPPRESS), #help='Flag to use the children\'s genotypes to pre-impute the parent\'s genotypes (via single locus peeling).')
     
@@ -41,6 +43,8 @@ def main():
     InputOutput.readInPedigreeFromInputs(pedigree, args, genotypes = True, haps = True, reads = True)
 
     for fam in pedigree.getFamilies() :
+        if args.magic:
+            FamilyMagic.imputeFamUsingFullSibs(fam, pedigree, args)
         if args.extphase :
             FamilyImputation.imputeFamFromPhasedParents(fam, pedigree)
         elif args.parentaverage:
