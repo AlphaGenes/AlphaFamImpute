@@ -75,6 +75,12 @@ def founderImputation(sire, dam, children, preimpute = False):
         children[i].haplotypes[0][:] = child_haplotypes[i,0,:]
         children[i].haplotypes[1][:] = child_haplotypes[i,1,:]
 
+    for child in children:
+        print(parent_haplotypes[0,:,:])
+        print(parent_haplotypes[1,:,:])
+        BasicHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = "dosages")
+        print(child.dosages)
+
 @njit
 def perform_updates(child_point_estimates, parent_point_estimates):
     nChildren = child_point_estimates.shape[0]
@@ -259,7 +265,7 @@ def get_transmitted_seg_matrix(seg):
 @njit
 def transmit(vect, output):
 
-    e = 0.01
+    e = 0.001
     e2 = e**2
     e1e = e*(1-e)
     e2i = (1.0-e)**2
