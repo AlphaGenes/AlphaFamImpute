@@ -76,10 +76,8 @@ def founderImputation(sire, dam, children, preimpute = False):
         children[i].haplotypes[1][:] = child_haplotypes[i,1,:]
 
     for child in children:
-        print(parent_haplotypes[0,:,:])
-        print(parent_haplotypes[1,:,:])
         BasicHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = "dosages")
-        print(child.dosages)
+
 
 @njit
 def perform_updates(child_point_estimates, parent_point_estimates):
