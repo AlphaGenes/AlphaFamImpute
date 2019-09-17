@@ -70,10 +70,13 @@ def founderImputation(sire, dam, children, preimpute = False):
     dam.haplotypes[0][:] = parent_haplotypes[1,0,:]
     dam.haplotypes[1][:] = parent_haplotypes[1,1,:]
 
-    for i in range(nChildren):
-        children[i].genotypes[:] = child_haplotypes[i,0,:] + child_haplotypes[i,1,:] 
-        children[i].haplotypes[0][:] = child_haplotypes[i,0,:]
-        children[i].haplotypes[1][:] = child_haplotypes[i,1,:]
+    # for i in range(nChildren):
+    #     children[i].genotypes[:] = child_haplotypes[i,0,:] + child_haplotypes[i,1,:] 
+    #     children[i].haplotypes[0][:] = child_haplotypes[i,0,:]
+    #     children[i].haplotypes[1][:] = child_haplotypes[i,1,:]
+
+    # print(parent_haplotypes[0,:,0:10])
+    # print(parent_haplotypes[1,:,0:10])
 
     for child in children:
         BasicHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = "dosages")
@@ -138,7 +141,9 @@ def maximization_pass(parent_estimate, aNorm):
 
     # Doing first index.
 
-    unraveled_index = np.argmax(parent_estimate[:,:,-1])  #At last loci.
+    # unraveled_index = np.argmax(parent_estimate[:,:,-1])  #At last loci.
+    unraveled_index = max_multisample(parent_estimate[:,:,-1])  #At last loci.
+
     sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,-1].shape)
     parent_genotypes[0, nLoci -1] = sire_geno
     parent_genotypes[1, nLoci -1] = dam_geno
@@ -149,7 +154,8 @@ def maximization_pass(parent_estimate, aNorm):
 
     child_seg = np.full((nChildren, nLoci), 9, dtype = np.int64)
     for child in range(nChildren):
-        child_seg[child,-1] = np.argmax(aNorm[child, :, sire_geno, dam_geno, -1])
+        # child_seg[child,-1] = np.argmax(aNorm[child, :, sire_geno, dam_geno, -1])
+        child_seg[child,-1] = max_multisample(aNorm[child, :, sire_geno, dam_geno, -1])
 
     for i in range(nLoci -2, -1, -1):
 
@@ -164,7 +170,8 @@ def maximization_pass(parent_estimate, aNorm):
         for child in range(nChildren):
             sire_score += log_sum_seg(beta[child, :, :, :, i])
         
-        unraveled_index = np.argmax(sire_score)  #At last loci.
+        # unraveled_index = np.argmax(sire_score)  #At last loci.
+        unraveled_index = max_multisample(sire_score)  #At last loci.
         sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,i].shape)
 
         parent_genotypes[0, i] = sire_geno
@@ -173,7 +180,9 @@ def maximization_pass(parent_estimate, aNorm):
         # calculate xt for each child.
 
         for child in range(nChildren):
-            child_seg[child,i] = np.argmax(beta[child, :, sire_geno, dam_geno, i])
+            child_seg[child,i] = max_multisample(beta[child, :, sire_geno, dam_geno, i])
+            # child_seg[child,i] = np.argmax(beta[child, :, sire_geno, dam_geno, i])
+
 
 
     parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
@@ -230,7 +239,7 @@ def add_backwards_sample(aNorm, seg, beta):
     seg_matrix = np.log(get_transmitted_seg_matrix(seg))
     for sire in range(4):
         for dam in range(4):
-            beta[:, sire, dam] = aNorm[:,sire, dam] + seg
+            beta[:, sire, dam] = aNorm[:,sire, dam] + seg_matrix
 
 
 @njit
@@ -430,4 +439,19 @@ def combineAndConvertToDosage(genoProb1, genoProb2) :
         combined = norm_1D_return(vect1 * vect2) # Not the fastest, but shrug.
         dosages[i] = combined[1] + combined[2] + 2*combined[3]
     return dosages
+
+
+
+
+
+@njit
+def max_multisample(input_mat):
+    flattened = input_mat.ravel()
+
+    max_val = np.max(flattened)
+    indexes = np.where(np.abs(flattened - max_val) < 1e-6)[0]
+    if len(indexes) == 1:
+        return indexes[0]
+    else:
+        return indexes[np.random.randint(0, len(indexes))]
 

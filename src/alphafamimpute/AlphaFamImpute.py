@@ -45,7 +45,7 @@ def main():
     for fam in pedigree.getFamilies() :
         if args.magic:
             FamilyMagic.imputeFamUsingFullSibs(fam, pedigree, args)
-        if args.extphase :
+        elif args.extphase :
             FamilyImputation.imputeFamFromPhasedParents(fam, pedigree)
         elif args.parentaverage:
             FamilySingleLocusPeeling.imputeFamFromParentAverage(fam, pedigree)
