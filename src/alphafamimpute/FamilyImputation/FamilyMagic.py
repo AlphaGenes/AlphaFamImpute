@@ -4,7 +4,7 @@ from ..tinyhouse import ProbMath
 from ..tinyhouse import InputOutput
 from . import FamilySingleLocusPeeling
 import math
-
+import random
 import numpy as np
 
 from numba import jit, njit
@@ -82,40 +82,67 @@ def founderImputation(sire, dam, children, preimpute = False):
         BasicHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = "dosages")
 
 
-@njit
+# @njit
 def perform_updates(child_point_estimates, parent_point_estimates):
     nChildren = child_point_estimates.shape[0]
     nLoci = child_point_estimates.shape[4]
 
-    # gamma step.
+    initial_seg = np.random.randint(0, 4, size = nChildren)
+    parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False)
+    np.savetxt("outputs/initial_seg.txt", child_seg, fmt="%i")
+
+    # parent_estimate, aNorm = forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci = np.repeat([1, 0], nLoci/2), zeroToN = True) # Breaks for even number of loci.
+
+    # parent_genotypes, child_seg = maximization_pass(parent_estimate, aNorm, initial_seg, False)
+    # np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
+
+
+    parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
+    child_haplotypes = extract_child_haplotypes(child_seg, parent_genotypes)
+
+
+    return parent_haplotypes, child_haplotypes
+
+@njit
+def forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci, zeroToN) :
+    nChildren = child_point_estimates.shape[0]
+    nLoci = child_point_estimates.shape[-1]
+
+    if zeroToN:
+        start = 0
+        stop = nLoci
+        step = 1
+    else:
+        start = nLoci - 1
+        stop = -1
+        step = -1
+
     parent_estimate = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
 
     aTilde = np.full(child_point_estimates.shape, 0, dtype = np.float32)
     aNorm = np.full(child_point_estimates.shape, 0, dtype = np.float32)
 
-    
-    for child in range(nChildren):
-        aTilde[child,:,:,:,0] = child_point_estimates[child,:,:,:,0]
+    first_loci = True
 
-    parent_estimate[:,:,0] = parent_point_estimates[:,:,0]
-    for child in range(nChildren):
-        parent_estimate[:,:,0] += log_sum_seg(child_point_estimates[child,:,:,:,0])
-
-
-    for child in range(nChildren):
-        # Loop is for annoying numpy notation to make sure the right axes get added.
-        log_sum = log_sum_seg(aTilde[child, :, :, :, 0])
-        for seg in range(4):
-            aNorm[child, seg, :,:, 0] = aTilde[child, seg, :, :, 0] - log_sum[:,:]
-
-
-    for i in range(1, nLoci):
+    forward_seg = np.full((nChildren, 4, nLoci), 0, dtype = np.float32)
+    for i in range(start, stop, step):
         for child in range(nChildren):
-            forward = combined_and_transmit(aNorm[child,:,:,:,i-1], parent_estimate[:, :, i-1])
+            if first_loci:
+                forward = np.zeros(4, dtype = np.float32)
+            else:
+                if fixed_loci[i]:
+                    genotype_matix = get_genotype_matrix(parent_genotypes[0, i-step], parent_genotypes[1, i-step])
+                    forward = combined_and_transmit(aNorm[child,:,:,:,i-step], genotype_matix)
+                else:
+                    forward = combined_and_transmit(aNorm[child,:,:,:,i-step], parent_estimate[:, :, i-step])
+
             # Loop is for annoying numpy notation to make sure the right axes get added.
             for sire in range(4):
                 for dam in range(4):
                     aTilde[child, :, sire, dam,i] = child_point_estimates[child,:, sire, dam, i] + forward[:]
+
+        if first_loci:
+            first_loci = False
 
         parent_estimate[:,:,i] = parent_point_estimates[:,:,i]
         for child in range(nChildren):
@@ -128,10 +155,20 @@ def perform_updates(child_point_estimates, parent_point_estimates):
             for seg in range(4):
                 aNorm[child, seg, :,:, i] = aTilde[child, seg, :, :, i] - log_sum[:,:]
 
-    return maximization_pass(parent_estimate, aNorm)
+            
+            if i == 0 and child == 1:
+                print("aTilde", i, child)
+                for seg in range(4):
+                    print(aTilde[child, seg, :,:, i])
+
+                print("aNorm", i, child)
+                for seg in range(4):
+                    print(aNorm[child, seg, :,:, i])
+
+    return parent_estimate, aNorm
 
 @njit
-def maximization_pass(parent_estimate, aNorm):
+def maximization_pass(parent_estimate, aNorm, initial_seg, zeroToN):
     nChildren = aNorm.shape[0]
     nLoci = aNorm.shape[-1]
 
@@ -141,38 +178,46 @@ def maximization_pass(parent_estimate, aNorm):
 
     # Doing first index.
 
-    # unraveled_index = np.argmax(parent_estimate[:,:,-1])  #At last loci.
-    unraveled_index = max_multisample(parent_estimate[:,:,-1])  #At last loci.
 
-    sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,-1].shape)
-    parent_genotypes[0, nLoci -1] = sire_geno
-    parent_genotypes[1, nLoci -1] = dam_geno
-    
-    # print(parent_estimate[:,:,-1])
-    # print(unraveled_index)
+    sire_score = np.full((4, 4), 0, dtype = np.float32)
 
+    if zeroToN:
+        start = 0
+        stop = nLoci
+        step = 1
+    else:
+        start = nLoci - 1
+        stop = -1
+        step = -1
 
+    first_loci = True
     child_seg = np.full((nChildren, nLoci), 9, dtype = np.int64)
-    for child in range(nChildren):
-        # child_seg[child,-1] = np.argmax(aNorm[child, :, sire_geno, dam_geno, -1])
-        child_seg[child,-1] = max_multisample(aNorm[child, :, sire_geno, dam_geno, -1])
 
-    for i in range(nLoci -2, -1, -1):
+    for i in range(start, stop, step):
 
         # Set beta for each child.
 
         for child in range(nChildren):
-            add_backwards_sample(aNorm[child,:,:,:,i], child_seg[child,i+1], beta[child, :, :, :, i]) # i+1 since we are including infromation from the loci we just sampled. 
-
+            if first_loci:
+                tmp_seg = initial_seg[child]
+            else:
+                tmp_seg = child_seg[child, i - step]
+            add_backwards_sample(aNorm[child,:,:,:,i], tmp_seg, beta[child, :, :, :, i]) # i+1 since we are including infromation from the loci we just sampled. 
+ 
+        if first_loci:
+            first_loci = False
         # calculate Ht for the parents.
 
-        sire_score = parent_estimate[:, :, i]
+        sire_score[:,:] = parent_estimate[:, :, i]
         for child in range(nChildren):
-            sire_score += log_sum_seg(beta[child, :, :, :, i])
-        
-        # unraveled_index = np.argmax(sire_score)  #At last loci.
+            sire_score += log_sum_seg(aNorm[child, :, :, :, i])
+
         unraveled_index = max_multisample(sire_score)  #At last loci.
         sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,i].shape)
+        
+        print(i, unraveled_index, sire_geno, dam_geno)
+        print(parent_estimate[:, :, i])
+        print(sire_score)
 
         parent_genotypes[0, i] = sire_geno
         parent_genotypes[1, i] = dam_geno
@@ -181,14 +226,8 @@ def maximization_pass(parent_estimate, aNorm):
 
         for child in range(nChildren):
             child_seg[child,i] = max_multisample(beta[child, :, sire_geno, dam_geno, i])
-            # child_seg[child,i] = np.argmax(beta[child, :, sire_geno, dam_geno, i])
 
-
-
-    parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
-    child_haplotypes = extract_child_haplotypes(child_seg, parent_genotypes)
-
-    return parent_haplotypes, child_haplotypes
+    return parent_genotypes, child_seg
 
 @njit
 def extract_parent_haplotypes(parent_genotypes):
@@ -224,6 +263,11 @@ def extract_haplotype(child_seg, parent_genotypes, output):
         output[1, i] = parse_genotype(dam_geno)[seg_dam]
 
 
+@njit
+def get_genotype_matrix(sire_genotype, dam_genotype):
+    mat = np.zeros((4, 4), dtype = np.float32)
+    mat[sire_genotype, dam_genotype] = 1
+    return mat
 
 
 @njit
@@ -298,11 +342,13 @@ def log_sum_seg(matrix) :
 @jit(nopython=True, nogil = True)
 def log_sum_exp_1D(mat):
     log_exp_sum = 0
-    maxVal = 1
+    first = True
+    maxVal = 100
     for a in range(4):
-        if mat[a] > maxVal or maxVal == 1:
+        if mat[a] > maxVal or first:
             maxVal = mat[a]
-
+        if first:
+            first = False
     # Should flag for better numba-ness.
     for a in range(4):
         log_exp_sum += np.exp(mat[a] - maxVal)
@@ -333,16 +379,14 @@ def exp_1D_norm(mat):
     # Matrix is 4: Output is to take the exponential of the matrix and normalize each locus. We need to make sure that there are not any overflow values.
     # Note, this changes the matrix in place by a constant.
     maxVal = 1 # Log of anything between 0-1 will be less than 0. Using 1 as a default.
-    for a in range(4):
+    for a in range(mat.shape[0]):
         if mat[a] > maxVal or maxVal == 1:
             maxVal = mat[a]
-    for a in range(4):
-        mat[a] -= maxVal
-
+    
     # Should flag for better numba-ness.
-    tmp = np.full(4, 0, dtype = np.float32)
-    for a in range(4):
-        tmp[a] = np.exp(mat[a])
+    tmp = np.full(mat.shape[0], 0, dtype = np.float32)
+    for a in range(mat.shape[0]):
+        tmp[a] = np.exp(mat[a] - maxVal)
 
     norm_1D(tmp)
 
@@ -448,10 +492,34 @@ def combineAndConvertToDosage(genoProb1, genoProb2) :
 def max_multisample(input_mat):
     flattened = input_mat.ravel()
 
+    weights = exp_1D_norm(flattened)
+    sample =  weighted_sample_1D(weights)
+
     max_val = np.max(flattened)
     indexes = np.where(np.abs(flattened - max_val) < 1e-6)[0]
+    if(len(indexes) == 0) : print(flattened, max_val, indexes)
     if len(indexes) == 1:
-        return indexes[0]
+        max_index = indexes[0]
     else:
-        return indexes[np.random.randint(0, len(indexes))]
+        max_index = indexes[np.random.randint(0, len(indexes))]
+    # if len(flattened) > 4:
+    #     print(sample, max_index)
+    return sample
+
+@jit(nopython=True, nogil=True) 
+def weighted_sample_1D(mat):
+    # Get sum of values    
+    total = 0
+    for i in range(mat.shape[0]):
+        total += mat[i]
+    value = random.random()*total
+
+    # Select value
+    for i in range(mat.shape[0]):
+        value -= mat[i]
+        if value < 0:
+            return i
+
+    return -1
+
 
