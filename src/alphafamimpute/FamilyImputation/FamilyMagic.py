@@ -103,81 +103,79 @@ def perform_updates(child_point_estimates, parent_point_estimates):
 
     return parent_haplotypes, child_haplotypes
 
-@njit
-def forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci, zeroToN) :
-    nChildren = child_point_estimates.shape[0]
-    nLoci = child_point_estimates.shape[-1]
+# @njit
+# def forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci, zeroToN) :
+#     nChildren = child_point_estimates.shape[0]
+#     nLoci = child_point_estimates.shape[-1]
 
-    if zeroToN:
-        start = 0
-        stop = nLoci
-        step = 1
-    else:
-        start = nLoci - 1
-        stop = -1
-        step = -1
+#     if zeroToN:
+#         start = 0
+#         stop = nLoci
+#         step = 1
+#     else:
+#         start = nLoci - 1
+#         stop = -1
+#         step = -1
 
-    parent_estimate = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
+#     parent_estimate = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
 
-    aTilde = np.full(child_point_estimates.shape, 0, dtype = np.float32)
-    aNorm = np.full(child_point_estimates.shape, 0, dtype = np.float32)
+#     aTilde = np.full(child_point_estimates.shape, 0, dtype = np.float32)
+#     aNorm = np.full(child_point_estimates.shape, 0, dtype = np.float32)
 
-    first_loci = True
+#     first_loci = True
 
-    forward_seg = np.full((nChildren, 4, nLoci), 0, dtype = np.float32)
-    for i in range(start, stop, step):
-        for child in range(nChildren):
-            if first_loci:
-                forward = np.zeros(4, dtype = np.float32)
-            else:
-                if fixed_loci[i]:
-                    genotype_matix = get_genotype_matrix(parent_genotypes[0, i-step], parent_genotypes[1, i-step])
-                    forward = combined_and_transmit(aNorm[child,:,:,:,i-step], genotype_matix)
-                else:
-                    forward = combined_and_transmit(aNorm[child,:,:,:,i-step], parent_estimate[:, :, i-step])
+#     forward_seg = np.full((nChildren, 4, nLoci), 0, dtype = np.float32)
+#     for i in range(start, stop, step):
+#         for child in range(nChildren):
+#             if first_loci:
+#                 forward = np.zeros(4, dtype = np.float32)
+#             else:
+#                 if fixed_loci[i]:
+#                     genotype_matix = get_genotype_matrix(parent_genotypes[0, i-step], parent_genotypes[1, i-step])
+#                     forward = combined_and_transmit(aNorm[child,:,:,:,i-step], genotype_matix)
+#                 else:
+#                     forward = combined_and_transmit(aNorm[child,:,:,:,i-step], parent_estimate[:, :, i-step])
 
-            # Loop is for annoying numpy notation to make sure the right axes get added.
-            for sire in range(4):
-                for dam in range(4):
-                    aTilde[child, :, sire, dam,i] = child_point_estimates[child,:, sire, dam, i] + forward[:]
+#             # Loop is for annoying numpy notation to make sure the right axes get added.
+#             for sire in range(4):
+#                 for dam in range(4):
+#                     aTilde[child, :, sire, dam,i] = child_point_estimates[child,:, sire, dam, i] + forward[:]
 
-        if first_loci:
-            first_loci = False
+#         if first_loci:
+#             first_loci = False
 
-        parent_estimate[:,:,i] = parent_point_estimates[:,:,i]
-        for child in range(nChildren):
-            parent_estimate[:,:,i] += log_sum_seg(aTilde[child, :, :, :, i])
+#         parent_estimate[:,:,i] = parent_point_estimates[:,:,i]
+#         for child in range(nChildren):
+#             parent_estimate[:,:,i] += log_sum_seg(aTilde[child, :, :, :, i])
 
 
-        for child in range(nChildren):
-            # Loop is for annoying numpy notation to make sure the right axes get added.
-            log_sum = log_sum_seg(aTilde[child, :, :, :, i])
-            for seg in range(4):
-                aNorm[child, seg, :,:, i] = aTilde[child, seg, :, :, i] - log_sum[:,:]
+#         for child in range(nChildren):
+#             # Loop is for annoying numpy notation to make sure the right axes get added.
+#             log_sum = log_sum_seg(aTilde[child, :, :, :, i])
+#             for seg in range(4):
+#                 aNorm[child, seg, :,:, i] = aTilde[child, seg, :, :, i] - log_sum[:,:]
 
             
-            if i == 0 and child == 1:
-                print("aTilde", i, child)
-                for seg in range(4):
-                    print(aTilde[child, seg, :,:, i])
+#             if i == 0 and child == 1:
+#                 print("aTilde", i, child)
+#                 for seg in range(4):
+#                     print(aTilde[child, seg, :,:, i])
 
-                print("aNorm", i, child)
-                for seg in range(4):
-                    print(aNorm[child, seg, :,:, i])
+#                 print("aNorm", i, child)
+#                 for seg in range(4):
+#                     print(aNorm[child, seg, :,:, i])
 
-    return parent_estimate, aNorm
+#     return parent_estimate, aNorm
 
 @njit
-def maximization_pass(parent_estimate, aNorm, initial_seg, zeroToN):
-    nChildren = aNorm.shape[0]
-    nLoci = aNorm.shape[-1]
+def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
+    nChildren = child_estimate.shape[0]
+    nLoci = child_estimate.shape[-1]
 
     parent_genotypes = np.full((2, nLoci), 9, dtype = np.int64) 
-    beta = np.full(aNorm.shape, 0, dtype = np.float32)
-
+    beta = np.full(child_estimate.shape, 0, dtype = np.float32)
 
     # Doing first index.
-
 
     sire_score = np.full((4, 4), 0, dtype = np.float32)
 
@@ -187,7 +185,7 @@ def maximization_pass(parent_estimate, aNorm, initial_seg, zeroToN):
         step = 1
     else:
         start = nLoci - 1
-        stop = -1
+        stop = 990
         step = -1
 
     first_loci = True
@@ -196,13 +194,16 @@ def maximization_pass(parent_estimate, aNorm, initial_seg, zeroToN):
     for i in range(start, stop, step):
 
         # Set beta for each child.
+        projected_seg = np.full((nChildren, 4), .25, dtype = np.float32)
 
         for child in range(nChildren):
             if first_loci:
+                projected_seg[child,:] = .25
                 tmp_seg = initial_seg[child]
             else:
                 tmp_seg = child_seg[child, i - step]
-            add_backwards_sample(aNorm[child,:,:,:,i], tmp_seg, beta[child, :, :, :, i]) # i+1 since we are including infromation from the loci we just sampled. 
+                projected_seg[child,:] = get_transmitted_seg_matrix(tmp_seg)
+            # add_backwards_sample(child_estimate[child,:,:,:,i], tmp_seg, beta[child, :, :, :, i]) # i+1 since we are including infromation from the loci we just sampled. 
  
         if first_loci:
             first_loci = False
@@ -210,7 +211,7 @@ def maximization_pass(parent_estimate, aNorm, initial_seg, zeroToN):
 
         sire_score[:,:] = parent_estimate[:, :, i]
         for child in range(nChildren):
-            sire_score += log_sum_seg(aNorm[child, :, :, :, i])
+            sire_score += log_sum_seg(child_estimate[child, :, :, :, i], projected_seg[child,:])
 
         unraveled_index = max_multisample(sire_score)  #At last loci.
         sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,i].shape)
@@ -225,7 +226,9 @@ def maximization_pass(parent_estimate, aNorm, initial_seg, zeroToN):
         # calculate xt for each child.
 
         for child in range(nChildren):
-            child_seg[child,i] = max_multisample(beta[child, :, sire_geno, dam_geno, i])
+            probs = child_estimate[child, :, sire_geno, dam_geno, i] # + np.log(projected_seg[child,:]) # The log projected_seg gives some prior based on previous loci.
+            child_seg[child,i] = max_multisample(probs)
+            # child_seg[child,i] = max_multisample(beta[child, :, sire_geno, dam_geno, i])
 
     return parent_genotypes, child_seg
 
@@ -316,7 +319,7 @@ def get_transmitted_seg_matrix(seg):
 @njit
 def transmit(vect, output):
 
-    e = 0.001
+    e = .001
     e2 = e**2
     e1e = e*(1-e)
     e2i = (1.0-e)**2
@@ -330,17 +333,17 @@ def transmit(vect, output):
 
 
 @njit
-def log_sum_seg(matrix) :
+def log_sum_seg(matrix, weights) :
     output = np.full((4,4), 0, dtype = np.float32)
     for pat in range(4):
         for mat in range(4):
             # print(matrix[:, pat, mat], log_sum_exp_1D(matrix[:, pat, mat]))
-            output[pat, mat] = log_sum_exp_1D(matrix[:, pat, mat]) # Residual on parent genotypes.
+            output[pat, mat] = log_sum_exp_1D(matrix[:, pat, mat], weights) # Residual on parent genotypes.
     return output
 
 
 @jit(nopython=True, nogil = True)
-def log_sum_exp_1D(mat):
+def log_sum_exp_1D(mat, weights):
     log_exp_sum = 0
     first = True
     maxVal = 100
@@ -349,9 +352,9 @@ def log_sum_exp_1D(mat):
             maxVal = mat[a]
         if first:
             first = False
-    # Should flag for better numba-ness.
+
     for a in range(4):
-        log_exp_sum += np.exp(mat[a] - maxVal)
+        log_exp_sum += weights[a]*np.exp(mat[a] - maxVal)
     
     return np.log(log_exp_sum) + maxVal
 
