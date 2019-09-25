@@ -56,6 +56,14 @@ def founderImputation(sire, dam, children, preimpute = False):
     for child in range(nChildren):
         fill_child_point_estimate(child_point_estimates[child,:,:,:,:], ref_reads[child], alt_reads[child])
 
+    # print(child_point_estimates[0, 0, :, :, -1])
+    # print(child_point_estimates[0, 1, :, :, -1])
+    # print(child_point_estimates[0, 2, :, :, -1])
+    # print(child_point_estimates[0, 3, :, :, -1])
+
+    child_geno_probs = get_genotype_probs(ref_reads[0], alt_reads[0])
+    # print(child_geno_probs[:, -1])
+
     parent_point_estimates = np.full((4, 4, nLoci), 0, dtype = np.float32) # Sire and dam. For their four haplotype states.
     fill_parent_point_estimate(parent_point_estimates, sire.reads[0], sire.reads[1], dam.reads[0], dam.reads[1])
 
@@ -87,14 +95,20 @@ def perform_updates(child_point_estimates, parent_point_estimates):
     nChildren = child_point_estimates.shape[0]
     nLoci = child_point_estimates.shape[4]
 
-    initial_seg = np.random.randint(0, 4, size = nChildren)
+    initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
     parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False)
     np.savetxt("outputs/initial_seg.txt", child_seg, fmt="%i")
 
+
+
     # parent_estimate, aNorm = forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci = np.repeat([1, 0], nLoci/2), zeroToN = True) # Breaks for even number of loci.
 
-    # parent_genotypes, child_seg = maximization_pass(parent_estimate, aNorm, initial_seg, False)
-    # np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
+    initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
+    for i in range(nChildren):
+        initial_seg[i, :] = get_transmitted_seg_matrix( child_seg[i, 0])
+
+    parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, True)
+    np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
 
 
     parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
@@ -185,11 +199,13 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
         step = 1
     else:
         start = nLoci - 1
-        stop = 990
+        stop = -1
         step = -1
 
     first_loci = True
     child_seg = np.full((nChildren, nLoci), 9, dtype = np.int64)
+
+    backward_seg = np.full((nChildren, 4, nLoci), .25, dtype = np.float32)
 
     for i in range(start, stop, step):
 
@@ -198,11 +214,12 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
 
         for child in range(nChildren):
             if first_loci:
-                projected_seg[child,:] = .25
-                tmp_seg = initial_seg[child]
+                projected_seg[child,:] = initial_seg[child, :]
             else:
                 tmp_seg = child_seg[child, i - step]
-                projected_seg[child,:] = get_transmitted_seg_matrix(tmp_seg)
+                transmit(backward_seg[child, :, i-step], projected_seg[child,:])
+                # projected_seg[child,:] = get_transmitted_seg_matrix(tmp_seg)
+
             # add_backwards_sample(child_estimate[child,:,:,:,i], tmp_seg, beta[child, :, :, :, i]) # i+1 since we are including infromation from the loci we just sampled. 
  
         if first_loci:
@@ -216,9 +233,11 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
         unraveled_index = max_multisample(sire_score)  #At last loci.
         sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,i].shape)
         
-        print(i, unraveled_index, sire_geno, dam_geno)
-        print(parent_estimate[:, :, i])
-        print(sire_score)
+        # print(i, unraveled_index, sire_geno, dam_geno)
+        # print(parent_estimate[:, :, i])
+        # print(sire_score)
+
+        # print(log_sum_seg(child_estimate[0, :, :, :, i], projected_seg[0,:]))
 
         parent_genotypes[0, i] = sire_geno
         parent_genotypes[1, i] = dam_geno
@@ -226,8 +245,9 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
         # calculate xt for each child.
 
         for child in range(nChildren):
-            probs = child_estimate[child, :, sire_geno, dam_geno, i] # + np.log(projected_seg[child,:]) # The log projected_seg gives some prior based on previous loci.
+            probs = child_estimate[child, :, sire_geno, dam_geno, i] + np.log(projected_seg[child,:]) # The log projected_seg gives some prior based on previous loci.
             child_seg[child,i] = max_multisample(probs)
+            backward_seg[child, :, i] = exp_1D_norm(probs)
             # child_seg[child,i] = max_multisample(beta[child, :, sire_geno, dam_geno, i])
 
     return parent_genotypes, child_seg
@@ -319,7 +339,9 @@ def get_transmitted_seg_matrix(seg):
 @njit
 def transmit(vect, output):
 
+    norm_1D(vect)
     e = .001
+    # e = .5
     e2 = e**2
     e1e = e*(1-e)
     e2i = (1.0-e)**2
@@ -357,6 +379,24 @@ def log_sum_exp_1D(mat, weights):
         log_exp_sum += weights[a]*np.exp(mat[a] - maxVal)
     
     return np.log(log_exp_sum) + maxVal
+
+
+
+@jit(nopython=True, nogil = True)
+def log_norm_1D(mat):
+    log_exp_sum = 0
+    first = True
+    maxVal = 100
+    for a in range(4):
+        if mat[a] > maxVal or first:
+            maxVal = mat[a]
+        if first:
+            first = False
+
+    for a in range(4):
+        log_exp_sum += np.exp(mat[a] - maxVal)
+    
+    return mat - (np.log(log_exp_sum) + maxVal)
 
 
 # @jit(nopython=True, nogil = True)
@@ -401,39 +441,53 @@ def exp_1D_norm(mat):
 @njit
 def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
 
+    child_geno_probs = get_genotype_probs(ref_reads, alt_reads)
+
     for seg in range(4):
         for sire in range(4):
             for dam in range(4):
-                genotype = get_genotype(seg, sire, dam)[2]
-                point_estimate[seg, sire, dam,:] = get_genotype_probs(genotype, ref_reads, alt_reads)
+                genotype = get_genotype(seg, sire, dam)
+                point_estimate[seg, sire, dam,:] = child_geno_probs[genotype, :]
 
 
 @njit
 def fill_parent_point_estimate(point_estimate, sire_ref, sire_alt, dam_ref, dam_alt) :
+    sire_geno_probs = get_genotype_probs(sire_ref, sire_alt)
+    dam_geno_probs = get_genotype_probs(dam_ref, dam_alt)
+    
     for sire in range(4):
-        sire_0, sire_1 = parse_genotype(sire)
-        sire_geno = sire_0 + sire_1
+        # sire_0, sire_1 = parse_genotype(sire)
+        # sire_geno = sire_0 + sire_1
 
         for dam in range(4):
-            dam_0, dam_1 = parse_genotype(dam)
-            dam_geno = dam_0 + dam_1
+            # dam_0, dam_1 = parse_genotype(dam)
+            # dam_geno = dam_0 + dam_1
 
-            point_estimate[sire, dam,:] = get_genotype_probs(sire_geno, sire_ref, sire_alt)
-            point_estimate[sire, dam,:] += get_genotype_probs(dam_geno, dam_ref, dam_alt)
+            point_estimate[sire, dam,:] = sire_geno_probs[sire]
+            point_estimate[sire, dam,:] += dam_geno_probs[dam]
 
 
 
 @njit
-def get_genotype_probs(genotype, ref_reads, alt_reads):
+def get_genotype_probs(ref_reads, alt_reads):
+    nLoci = len(ref_reads)
+
     loge = np.log(0.001)
-    log1e = np.log(1-0.001)
+    log1 = np.log(1-0.001)
     log2 = np.log(.5)
 
-    if genotype == 0: values = ref_reads*log1e + alt_reads*loge
-    if genotype == 1: values = log2*(ref_reads + alt_reads)
-    if genotype == 2: values = alt_reads*log1e + ref_reads*loge
+    val_seq = np.full((4, nLoci), 0, dtype = np.float32)
+    val_seq[0,:] = log1*ref_reads + loge*alt_reads
+    val_seq[1,:] = log2*ref_reads + log2*alt_reads
+    val_seq[2,:] = log2*ref_reads + log2*alt_reads
+    val_seq[3,:] = loge*ref_reads + log1*alt_reads
 
-    return values.astype(np.float32)
+    output = np.full((4, nLoci), 0, dtype = np.float32)
+
+    for i in range(nLoci):
+        output[:,i] = log_norm_1D(val_seq[:, i])
+   
+    return output.astype(np.float32)
 @njit
 def get_genotype(seg, sire, dam):
 
@@ -442,7 +496,11 @@ def get_genotype(seg, sire, dam):
     geno_sire = parse_genotype(sire)[seg_sire]
     geno_dam = parse_genotype(dam)[seg_dam]
 
-    return geno_sire, geno_dam, geno_sire + geno_dam
+    if geno_sire == 0 and geno_dam == 0: return 0
+    if geno_sire == 0 and geno_dam == 1: return 1
+    if geno_sire == 1 and geno_dam == 0: return 2
+    if geno_sire == 1 and geno_dam == 1: return 3
+    return 0
 
 @njit
 def parse_genotype(geno):
@@ -495,8 +553,8 @@ def combineAndConvertToDosage(genoProb1, genoProb2) :
 def max_multisample(input_mat):
     flattened = input_mat.ravel()
 
-    weights = exp_1D_norm(flattened)
-    sample =  weighted_sample_1D(weights)
+    # weights = exp_1D_norm(flattened)
+    # sample =  weighted_sample_1D(weights)
 
     max_val = np.max(flattened)
     indexes = np.where(np.abs(flattened - max_val) < 1e-6)[0]
@@ -507,7 +565,7 @@ def max_multisample(input_mat):
         max_index = indexes[np.random.randint(0, len(indexes))]
     # if len(flattened) > 4:
     #     print(sample, max_index)
-    return sample
+    return max_index
 
 @jit(nopython=True, nogil=True) 
 def weighted_sample_1D(mat):
