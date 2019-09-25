@@ -1,8 +1,10 @@
 from ..tinyhouse import HaplotypeOperations
-from ..tinyhouse import BasicHMM
 from ..tinyhouse import ProbMath
 from ..tinyhouse import InputOutput
+
 from . import FamilySingleLocusPeeling
+from . import DiploidHMM
+
 import math
 import random
 import numpy as np
@@ -56,18 +58,12 @@ def founderImputation(sire, dam, children, preimpute = False):
     for child in range(nChildren):
         fill_child_point_estimate(child_point_estimates[child,:,:,:,:], ref_reads[child], alt_reads[child])
 
-    # print(child_point_estimates[0, 0, :, :, -1])
-    # print(child_point_estimates[0, 1, :, :, -1])
-    # print(child_point_estimates[0, 2, :, :, -1])
-    # print(child_point_estimates[0, 3, :, :, -1])
-
     child_geno_probs = get_genotype_probs(ref_reads[0], alt_reads[0])
-    # print(child_geno_probs[:, -1])
 
     parent_point_estimates = np.full((4, 4, nLoci), 0, dtype = np.float32) # Sire and dam. For their four haplotype states.
     fill_parent_point_estimate(parent_point_estimates, sire.reads[0], sire.reads[1], dam.reads[0], dam.reads[1])
 
-    parent_haplotypes, child_haplotypes = perform_updates(child_point_estimates, parent_point_estimates)
+    parent_haplotypes, child_haplotypes, paternal_probs, maternal_probs = perform_updates(child_point_estimates, parent_point_estimates)
 
     sire.genotypes[:] =   parent_haplotypes[0,0,:] + parent_haplotypes[0,1,:] 
     sire.haplotypes[0][:] = parent_haplotypes[0,0,:]
@@ -78,16 +74,11 @@ def founderImputation(sire, dam, children, preimpute = False):
     dam.haplotypes[0][:] = parent_haplotypes[1,0,:]
     dam.haplotypes[1][:] = parent_haplotypes[1,1,:]
 
-    # for i in range(nChildren):
-    #     children[i].genotypes[:] = child_haplotypes[i,0,:] + child_haplotypes[i,1,:] 
-    #     children[i].haplotypes[0][:] = child_haplotypes[i,0,:]
-    #     children[i].haplotypes[1][:] = child_haplotypes[i,1,:]
-
-    # print(parent_haplotypes[0,:,0:10])
-    # print(parent_haplotypes[1,:,0:10])
-
+    print(paternal_probs)
+    print(maternal_probs)
     for child in children:
-        BasicHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, useCalledHaps = False, callingMethod = "dosages")
+        DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, 0.01, 1.0/nLoci, .95)
+        # DiploidHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, .95)
 
 
 # @njit
@@ -95,96 +86,36 @@ def perform_updates(child_point_estimates, parent_point_estimates):
     nChildren = child_point_estimates.shape[0]
     nLoci = child_point_estimates.shape[4]
 
+
+    # BACKWARD PASS
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
-    parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False)
+    parent_genotypes, child_seg, parent_geno_probs= maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False)
     # np.savetxt("outputs/initial_seg.txt", child_seg, fmt="%i")
 
-
-
-    # parent_estimate, aNorm = forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci = np.repeat([1, 0], nLoci/2), zeroToN = True) # Breaks for even number of loci.
+    # FORWARD PASS
 
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
     for i in range(nChildren):
         initial_seg[i, :] = get_transmitted_seg_matrix( child_seg[i, 0])
 
-    parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, True)
+    parent_genotypes, child_seg, parent_geno_probs = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, True)
     # np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
 
 
     parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
+    paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)
     child_haplotypes = extract_child_haplotypes(child_seg, parent_genotypes)
 
 
-    return parent_haplotypes, child_haplotypes
-
-# @njit
-# def forward_pass(parent_point_estimates, child_point_estimates, parent_genotypes, fixed_loci, zeroToN) :
-#     nChildren = child_point_estimates.shape[0]
-#     nLoci = child_point_estimates.shape[-1]
-
-#     if zeroToN:
-#         start = 0
-#         stop = nLoci
-#         step = 1
-#     else:
-#         start = nLoci - 1
-#         stop = -1
-#         step = -1
-
-#     parent_estimate = np.full((4, 4, nLoci), 0, dtype = np.float32) # Haplotypes. One dimension for each parent. This is not going to scale, but maybe some independence statements?
-
-#     aTilde = np.full(child_point_estimates.shape, 0, dtype = np.float32)
-#     aNorm = np.full(child_point_estimates.shape, 0, dtype = np.float32)
-
-#     first_loci = True
-
-#     forward_seg = np.full((nChildren, 4, nLoci), 0, dtype = np.float32)
-#     for i in range(start, stop, step):
-#         for child in range(nChildren):
-#             if first_loci:
-#                 forward = np.zeros(4, dtype = np.float32)
-#             else:
-#                 if fixed_loci[i]:
-#                     genotype_matix = get_genotype_matrix(parent_genotypes[0, i-step], parent_genotypes[1, i-step])
-#                     forward = combined_and_transmit(aNorm[child,:,:,:,i-step], genotype_matix)
-#                 else:
-#                     forward = combined_and_transmit(aNorm[child,:,:,:,i-step], parent_estimate[:, :, i-step])
-
-#             # Loop is for annoying numpy notation to make sure the right axes get added.
-#             for sire in range(4):
-#                 for dam in range(4):
-#                     aTilde[child, :, sire, dam,i] = child_point_estimates[child,:, sire, dam, i] + forward[:]
-
-#         if first_loci:
-#             first_loci = False
-
-#         parent_estimate[:,:,i] = parent_point_estimates[:,:,i]
-#         for child in range(nChildren):
-#             parent_estimate[:,:,i] += log_sum_seg(aTilde[child, :, :, :, i])
-
-
-#         for child in range(nChildren):
-#             # Loop is for annoying numpy notation to make sure the right axes get added.
-#             log_sum = log_sum_seg(aTilde[child, :, :, :, i])
-#             for seg in range(4):
-#                 aNorm[child, seg, :,:, i] = aTilde[child, seg, :, :, i] - log_sum[:,:]
-
-            
-#             if i == 0 and child == 1:
-#                 print("aTilde", i, child)
-#                 for seg in range(4):
-#                     print(aTilde[child, seg, :,:, i])
-
-#                 print("aNorm", i, child)
-#                 for seg in range(4):
-#                     print(aNorm[child, seg, :,:, i])
-
-#     return parent_estimate, aNorm
+    return parent_haplotypes, child_haplotypes, paternal_probs, maternal_probs
 
 @njit
 def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
     nChildren = child_estimate.shape[0]
     nLoci = child_estimate.shape[-1]
+
+
+    parent_geno_probs = np.full((4, 4, nLoci), 9, dtype = np.float32)
 
     parent_genotypes = np.full((2, nLoci), 9, dtype = np.int64) 
     beta = np.full(child_estimate.shape, 0, dtype = np.float32)
@@ -230,6 +161,8 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
         for child in range(nChildren):
             sire_score += log_sum_seg(child_estimate[child, :, :, :, i], projected_seg[child,:])
 
+        parent_geno_probs[:,:,i] = exp_2D_norm(sire_score)
+
         unraveled_index = max_multisample(sire_score)  #At last loci.
         sire_geno, dam_geno = numba_unravel(unraveled_index, parent_estimate[:,:,i].shape)
         
@@ -250,7 +183,23 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
             backward_seg[child, :, i] = exp_1D_norm(probs)
             # child_seg[child,i] = max_multisample(beta[child, :, sire_geno, dam_geno, i])
 
-    return parent_genotypes, child_seg
+    return parent_genotypes, child_seg, parent_geno_probs
+
+
+@njit
+def extract_haplotype_probs(joint_geno_probs):
+    maternal_probs = np.sum(joint_geno_probs, 0)
+    paternal_probs = np.sum(joint_geno_probs, 1)
+
+    return convert_haplotype_dosages(paternal_probs), convert_haplotype_dosages(maternal_probs)
+
+@njit
+def convert_haplotype_dosages(geno_probs) :
+    nLoci = geno_probs.shape[-1]
+    output = np.full((2, nLoci), 0, dtype = np.float32)
+    output[0, :] = geno_probs[2,:] + geno_probs[3,:]
+    output[1, :] = geno_probs[1,:] + geno_probs[3,:]
+    return output
 
 @njit
 def extract_parent_haplotypes(parent_genotypes):
@@ -436,7 +385,11 @@ def exp_1D_norm(mat):
     return tmp
 
 
-
+@njit
+def exp_2D_norm(input_mat):
+    flattened = input_mat.ravel()
+    output = exp_1D_norm(flattened)
+    return output.reshape(input_mat.shape)
 
 @njit
 def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
