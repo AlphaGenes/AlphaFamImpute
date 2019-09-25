@@ -97,7 +97,7 @@ def perform_updates(child_point_estimates, parent_point_estimates):
 
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
     parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False)
-    np.savetxt("outputs/initial_seg.txt", child_seg, fmt="%i")
+    # np.savetxt("outputs/initial_seg.txt", child_seg, fmt="%i")
 
 
 
@@ -108,7 +108,7 @@ def perform_updates(child_point_estimates, parent_point_estimates):
         initial_seg[i, :] = get_transmitted_seg_matrix( child_seg[i, 0])
 
     parent_genotypes, child_seg = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, True)
-    np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
+    # np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
 
 
     parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
