@@ -3,7 +3,7 @@ import numpy as np
 from ..tinyhouse import ProbMath
 
 
-def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, calling_threashold = .95): 
+def diploidHMM(ind, paternal_probs, maternal_probs, joint_probs, error, recombinationRate, calling_threashold = .95): 
 
     nLoci = len(ind.genotypes)
 
@@ -24,6 +24,7 @@ def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, ca
         maternal_called[i,:] = call_haplotypes(maternal_probs[i,:], calling_threashold)
 
     non_missing_loci = np.where(np.all(paternal_called != 9, axis = 0) & np.all(maternal_called != 9, axis = 0))[0]
+    missing_loci = np.where(~ (np.all(paternal_called != 9, axis = 0) & np.all(maternal_called != 9, axis = 0)))[0]
     ###Construct penetrance values
 
     probs = ProbMath.getGenotypeProbabilities_ind(ind)
@@ -36,9 +37,37 @@ def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, ca
     #     print(hapEst[:,:,i])
     # raise Exception()
 
+    # geno_probs = np.full((4, nLoci), 0, dtype = np.float32)
+    # geno_probs_called = get_diploid_geno_probs(hapEst, paternal_probs, maternal_probs)
+    # geno_probs_multi_locus = get_multi_locus_estimate(hapEst, joint_probs, probs) 
+    # geno_probs[:, non_missing_loci] = geno_probs_called[:, non_missing_loci]
+    # geno_probs[:, missing_loci] = geno_probs_multi_locus[:, missing_loci]
+    
+    geno_probs = get_diploid_geno_probs(hapEst, paternal_probs, maternal_probs)
 
-    dosages = getDiploidDosages(hapEst, paternal_probs, maternal_probs)
+    geno_probs = geno_probs/np.sum(geno_probs, axis = 0)
+
+    dosages = geno_probs[1,:] + geno_probs[2,:] + 2*geno_probs[3,:]
+
     ind.dosages = dosages
+
+
+def get_multi_locus_estimate(hapEst, joint_parent_probs, child_probs):
+
+    segregation_tensor = ProbMath.generateSegregation(partial = False) 
+    nLoci = hapEst.shape[-1]
+    segregation = np.full((4, nLoci), 0, dtype = np.float32)
+    segregation[0, :] = hapEst[0, 0, :]
+    segregation[1, :] = hapEst[0, 1, :]
+    segregation[2, :] = hapEst[1, 0, :]
+    segregation[3, :] = hapEst[1, 1, :]
+
+    child_anterior = np.einsum("abi, abcd, di-> ci", joint_parent_probs, segregation_tensor, segregation)
+    child_combined = child_anterior * child_probs
+    child_combined /= np.sum(child_combined, 0)
+
+    return child_combined
+
 
 @jit(nopython=True)
 def call_haplotypes(hap, threshold):
@@ -60,6 +89,28 @@ def getDiploidDosages(hapEst, paternalHaplotypes, maternalHaplotypes):
             for k in range(nMat):
                 dosages[i] += hapEst[j,k,i]*(paternalHaplotypes[j,i] + maternalHaplotypes[k,i])
     return dosages
+
+
+@jit(nopython=True)
+def get_diploid_geno_probs(hapEst, paternalHaplotypes, maternalHaplotypes):
+    nPat, nLoci = paternalHaplotypes.shape
+    nMat, nLoci = maternalHaplotypes.shape
+    geno_probs = np.full((4, nLoci), 0, dtype = np.float32)
+    for i in range(nLoci):
+        for j in range(nPat):
+            for k in range(nMat):
+                pat_a = 1 - paternalHaplotypes[j,i]
+                pat_A = paternalHaplotypes[j,i]
+                mat_a = 1 - maternalHaplotypes[k,i]
+                mat_A = maternalHaplotypes[k,i]
+
+                geno_probs[0, i] += hapEst[j,k,i]*(pat_a*mat_a)
+                geno_probs[1, i] += hapEst[j,k,i]*(pat_a*mat_A)
+                geno_probs[2, i] += hapEst[j,k,i]*(pat_A*mat_a)
+                geno_probs[3, i] += hapEst[j,k,i]*(pat_A*mat_A)
+    return geno_probs
+
+
 
 @jit(nopython=True)
 def getDiploidPointEstimates(indGeno, indPatHap, indMatHap, paternalHaplotypes, maternalHaplotypes, error):
