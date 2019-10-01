@@ -13,9 +13,8 @@ import numpy as np
 from numba import jit, njit
 import math
 
-def imputeFamUsingFullSibs(fam, pedigree, args) :
-
-    founderImputation(fam.sire, fam.dam, fam.offspring)
+def imputeFamUsingFullSibs(fam, pedigree, rec_rate = None) :
+    founderImputation(fam.sire, fam.dam, fam.offspring, rec_rate)
 
 def founderImputation(sire, dam, children, rec_rate = None):
     nChildren = len(children)
@@ -445,7 +444,6 @@ def select_value_1D(input_mat, tmp):
 
 @njit
 def select_value_2D(input_mat, tmp):
-   
     max_val = np.max(input_mat)
 
     n_hits = 0
