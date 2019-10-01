@@ -17,49 +17,39 @@ def imputeFamUsingFullSibs(fam, pedigree, args) :
 
     founderImputation(fam.sire, fam.dam, fam.offspring)
 
-@Utils.time_func("full imputation")
-def founderImputation(sire, dam, children):
-    
+def founderImputation(sire, dam, children, rec_rate = None):
     nChildren = len(children)
     nLoci = len(sire.genotypes)
-    ref_reads = np.full((nChildren, nLoci), 0, dtype = np.float32)
-    alt_reads = np.full((nChildren, nLoci), 0, dtype = np.float32)
 
-    for i in range(nChildren):
-        ref_reads[i,:] = children[i].reads[0]
-        alt_reads[i,:] = children[i].reads[1]
-
+    if rec_rate is None:
+        rec_rate = 1/nLoci
    
     # Generate point segregation estimates for the child based on possible parental genotypes.
     child_point_estimates = np.full((nChildren, 4, 4, 4, nLoci), 0, dtype = np.float32) # Three dimensional array for each individual. First index is segregation, then father and mother's haplotypes.
-    
-    for child in range(nChildren):
-        fill_child_point_estimate(child_point_estimates[child,:,:,:,:], ref_reads[child], alt_reads[child])
-
-    child_geno_probs = get_genotype_probs(ref_reads[0], alt_reads[0])
+    for i, child in enumerate(children):
+        child_geno_probs = np.log(ProbMath.getGenotypeProbabilities_ind(child))
+        fill_child_point_estimate(child_point_estimates[i,:,:,:,:], child_geno_probs)
 
     parent_point_estimates = np.full((4, 4, nLoci), 0, dtype = np.float32) # Sire and dam. For their four haplotype states.
-    fill_parent_point_estimate(parent_point_estimates, sire.reads[0], sire.reads[1], dam.reads[0], dam.reads[1])
+    sire_geno_probs = np.log(ProbMath.getGenotypeProbabilities_ind(sire))
+    dam_geno_probs = np.log(ProbMath.getGenotypeProbabilities_ind(dam))
+    fill_parent_point_estimate(parent_point_estimates, sire_geno_probs, dam_geno_probs)
 
     # Run the forward-backward algorithm.
-    parent_haplotypes, parent_geno_probs = phase_parents(child_point_estimates, parent_point_estimates)
+    parent_haplotypes, parent_geno_probs = phase_parents(child_point_estimates, parent_point_estimates, rec_rate)
 
     align_individual(sire, parent_haplotypes[0,:,:], )
     align_individual(dam, parent_haplotypes[1,:,:], )
 
     paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)
-    child_imputation(children, paternal_probs, maternal_probs, parent_geno_probs, nLoci)
-
-@Utils.time_func("child imputation")
-def child_imputation(children, paternal_probs, maternal_probs, parent_geno_probs, nLoci):
-
+    
+    # Impute the offspring.
     for child in children:
-        DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, parent_geno_probs, 0.01, 1.0/nLoci, .95)
-        # DiploidHMM.diploidHMM(child, parent_haplotypes[0,:,:], parent_haplotypes[1,:,:], 0.01, 1.0/nLoci, .95)
+        DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, 0.01, rec_rate, .95)
 
 
-# @njit
-def phase_parents(child_point_estimates, parent_point_estimates):
+@njit
+def phase_parents(child_point_estimates, parent_point_estimates, rec_rate):
     nChildren = child_point_estimates.shape[0]
     nLoci = child_point_estimates.shape[4]
 
@@ -68,16 +58,14 @@ def phase_parents(child_point_estimates, parent_point_estimates):
 
     # BACKWARD PASS -- Unknown start with phasing. 
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
-    parent_genotypes, child_seg, parent_geno_probs= maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False)
+    parent_genotypes, child_seg, parent_geno_probs= maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, False, rec_rate)
     # np.savetxt("outputs/initial_seg.txt", child_seg, fmt="%i")
 
     # FORWARD PASS
-
-    initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
     for i in range(nChildren):
-        initial_seg[i, :] = get_transmitted_seg_matrix(child_seg[i, 0])
+        initial_seg[i, :] = get_transmitted_seg_matrix(child_seg[i, 0], rec_rate)
 
-    parent_genotypes, child_seg, parent_geno_probs = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, True)
+    parent_genotypes, child_seg, parent_geno_probs = maximization_pass(parent_point_estimates, child_point_estimates, initial_seg, True, rec_rate)
     # np.savetxt("outputs/second_seg.txt", child_seg, fmt="%i")
 
     parent_haplotypes = extract_parent_haplotypes(parent_genotypes)
@@ -85,7 +73,7 @@ def phase_parents(child_point_estimates, parent_point_estimates):
     return parent_haplotypes, parent_geno_probs
 
 @njit
-def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
+def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN, rec_rate):
     nChildren = child_estimate.shape[0]
     nLoci = child_estimate.shape[-1]
 
@@ -128,7 +116,7 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
             if first_loci:
                 projected_seg[child,:] = initial_seg[child, :]
             else:
-                transmit(backward_seg[child, :, i-step], output = projected_seg[child,:]) #TODO: ADD TRANSMISSION RATE
+                transmit(backward_seg[child, :, i-step], output = projected_seg[child,:], rec_rate = rec_rate)
  
         if first_loci:
             first_loci = False
@@ -148,9 +136,9 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
 
         # Update the children's genotypes.
         for child in range(nChildren):
-            probs = child_estimate[child, :, sire_geno, dam_geno, i] + np.log(projected_seg[child,:]) # The log projected_seg gives some prior based on previous loci.
-            exp_1D_norm(probs, backward_seg[child, :, i]) # This gets passed to the next loci.
-            child_seg[child,i] = select_value_1D(probs, select_value_tmp_1d) # This gets saved and returned.
+            backward_seg[child, :, i] = np.exp(child_estimate[child, :, sire_geno, dam_geno, i]) * projected_seg[child,:]
+            norm_1D(backward_seg[child, :, i]) # This gets passed to the next loci.
+            child_seg[child,i] = select_value_1D(backward_seg[child, :, i], select_value_tmp_1d) # This gets saved and returned.
 
     return parent_genotypes, child_seg, parent_geno_probs
 
@@ -199,21 +187,20 @@ def numba_unravel(index, shape):
 
 
 @njit
-def get_transmitted_seg_matrix(seg):
+def get_transmitted_seg_matrix(seg, rec_rate):
 
     prev = np.full(4, 0, dtype = np.float32)
     output = np.full(4, 0, dtype = np.float32)
 
     prev[seg] = 1
-    return(transmit(prev, output))
+    return(transmit(prev, output, rec_rate))
 
 
 @njit
-def transmit(vect, output):
+def transmit(vect, output, rec_rate):
 
     norm_1D(vect)
-    e = .001
-    # e = .5
+    e = rec_rate
     e2 = e**2
     e1e = e*(1-e)
     e2i = (1.0-e)**2
@@ -315,9 +302,7 @@ def exp_2D_norm(mat, output):
 
 
 @njit
-def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
-
-    child_geno_probs = get_genotype_probs(ref_reads, alt_reads)
+def fill_child_point_estimate(point_estimate, child_geno_probs) :
     for seg in range(4):
         for sire in range(4):
             for dam in range(4):
@@ -326,35 +311,33 @@ def fill_child_point_estimate(point_estimate, ref_reads, alt_reads) :
 
 
 @njit
-def fill_parent_point_estimate(point_estimate, sire_ref, sire_alt, dam_ref, dam_alt) :
-    sire_geno_probs = get_genotype_probs(sire_ref, sire_alt)
-    dam_geno_probs = get_genotype_probs(dam_ref, dam_alt)
+def fill_parent_point_estimate(point_estimate, sire_geno_probs, dam_geno_probs) :
     for sire in range(4):
         for dam in range(4):
             point_estimate[sire, dam,:] = sire_geno_probs[sire]
             point_estimate[sire, dam,:] += dam_geno_probs[dam]
 
 
-@njit
-def get_genotype_probs(ref_reads, alt_reads):
-    nLoci = len(ref_reads)
+# @njit
+# def get_genotype_probs(ref_reads, alt_reads):
+#     nLoci = len(ref_reads)
 
-    loge = np.log(0.001)
-    log1 = np.log(1-0.001)
-    log2 = np.log(.5)
+#     loge = np.log(0.001)
+#     log1 = np.log(1-0.001)
+#     log2 = np.log(.5)
 
-    val_seq = np.full((4, nLoci), 0, dtype = np.float32)
-    val_seq[0,:] = log1*ref_reads + loge*alt_reads
-    val_seq[1,:] = log2*ref_reads + log2*alt_reads
-    val_seq[2,:] = log2*ref_reads + log2*alt_reads
-    val_seq[3,:] = loge*ref_reads + log1*alt_reads
+#     val_seq = np.full((4, nLoci), 0, dtype = np.float32)
+#     val_seq[0,:] = log1*ref_reads + loge*alt_reads
+#     val_seq[1,:] = log2*ref_reads + log2*alt_reads
+#     val_seq[2,:] = log2*ref_reads + log2*alt_reads
+#     val_seq[3,:] = loge*ref_reads + log1*alt_reads
 
-    output = np.full((4, nLoci), 0, dtype = np.float32)
+#     output = np.full((4, nLoci), 0, dtype = np.float32)
 
-    for i in range(nLoci):
-        output[:,i] = log_norm_1D(val_seq[:, i])
+#     for i in range(nLoci):
+#         output[:,i] = log_norm_1D(val_seq[:, i])
    
-    return output.astype(np.float32)
+#     return output.astype(np.float32)
 
 
 @njit

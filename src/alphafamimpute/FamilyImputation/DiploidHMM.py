@@ -3,7 +3,7 @@ import numpy as np
 from ..tinyhouse import ProbMath
 
 
-def diploidHMM(ind, paternal_probs, maternal_probs, joint_probs, error, recombinationRate, calling_threashold = .95): 
+def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, calling_threashold = .95): 
 
     nLoci = len(ind.genotypes)
 
@@ -33,16 +33,7 @@ def diploidHMM(ind, paternal_probs, maternal_probs, joint_probs, error, recombin
     
     ### Run forward-backward algorithm on penetrance values.
     hapEst = diploidForwardBackward(pointEst, recombinationRate)
-    # for i in range(nLoci) :
-    #     print(hapEst[:,:,i])
-    # raise Exception()
 
-    # geno_probs = np.full((4, nLoci), 0, dtype = np.float32)
-    # geno_probs_called = get_diploid_geno_probs(hapEst, paternal_probs, maternal_probs)
-    # geno_probs_multi_locus = get_multi_locus_estimate(hapEst, joint_probs, probs) 
-    # geno_probs[:, non_missing_loci] = geno_probs_called[:, non_missing_loci]
-    # geno_probs[:, missing_loci] = geno_probs_multi_locus[:, missing_loci]
-    
     geno_probs = get_diploid_geno_probs(hapEst, paternal_probs, maternal_probs)
 
     geno_probs = geno_probs/np.sum(geno_probs, axis = 0)
