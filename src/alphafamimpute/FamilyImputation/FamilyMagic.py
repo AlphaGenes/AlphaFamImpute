@@ -4,6 +4,7 @@ from ..tinyhouse import InputOutput
 
 from . import FamilySingleLocusPeeling
 from . import DiploidHMM
+from . import Utils
 
 import math
 import random
@@ -16,6 +17,7 @@ def imputeFamUsingFullSibs(fam, pedigree, args) :
 
     founderImputation(fam.sire, fam.dam, fam.offspring)
 
+@Utils.time_func("full imputation")
 def founderImputation(sire, dam, children):
     
     nChildren = len(children)
@@ -46,6 +48,10 @@ def founderImputation(sire, dam, children):
     align_individual(dam, parent_haplotypes[1,:,:], )
 
     paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)
+    child_imputation(children, paternal_probs, maternal_probs, parent_geno_probs, nLoci)
+
+@Utils.time_func("child imputation")
+def child_imputation(children, paternal_probs, maternal_probs, parent_geno_probs, nLoci):
 
     for child in children:
         DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, parent_geno_probs, 0.01, 1.0/nLoci, .95)
@@ -107,18 +113,22 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
     first_loci = True
     sire_score = np.full((4, 4), 0, dtype = np.float32)
 
-
+    # output_1d = np.full(4, 0, dtype = np.float32)
+    # output_2d = np.full((4, 4), 0, dtype = np.float32)
+    projected_seg = np.full((nChildren, 4), .25, dtype = np.float32)
+    parent_geno_probs_tmp_2d = np.full((4, 4), .25, dtype = np.float32)
+    
+    # Temporary values for select_value
+    select_value_tmp_1d = np.full(4, 0, dtype = np.int64)
+    select_value_tmp_2d = np.full((4, 4), 0, dtype = np.int64)
     for i in range(start, stop, step):
 
         # Set the estimated segregation for each child based on the segregation at the previous locus. Use initial_seg for the first locus.
-        projected_seg = np.full((nChildren, 4), .25, dtype = np.float32)
-
         for child in range(nChildren):
             if first_loci:
                 projected_seg[child,:] = initial_seg[child, :]
             else:
-                tmp_seg = child_seg[child, i - step]
-                transmit(backward_seg[child, :, i-step], projected_seg[child,:]) #TODO: ADD TRANSMISSION RATE
+                transmit(backward_seg[child, :, i-step], output = projected_seg[child,:]) #TODO: ADD TRANSMISSION RATE
  
         if first_loci:
             first_loci = False
@@ -127,22 +137,20 @@ def maximization_pass(parent_estimate, child_estimate, initial_seg, zeroToN):
 
         sire_score[:,:] = parent_estimate[:, :, i]
         for child in range(nChildren):
-            sire_score += project_child_to_parent(child_estimate[child, :, :, :, i], projected_seg[child,:])
+            project_child_to_parent(child_estimate[child, :, :, :, i], projected_seg[child,:], sire_score)
 
-        parent_geno_probs[:,:,i] = exp_2D_norm(sire_score)
-        unraveled_index = select_value(sire_score)  #At last loci.
-        sire_geno, dam_geno = numba_unravel(unraveled_index, sire_score.shape)
-        
+        exp_2D_norm(sire_score, parent_geno_probs_tmp_2d)
+        parent_geno_probs[:,:,i] = parent_geno_probs_tmp_2d
+
+        sire_geno, dam_geno = select_value_2D(sire_score, select_value_tmp_2d)
         parent_genotypes[0, i] = sire_geno
         parent_genotypes[1, i] = dam_geno
 
         # Update the children's genotypes.
-        # Maybe we want to do some calling here, but maybe not.
-        # We sample the children's seg, but don't use it.
         for child in range(nChildren):
             probs = child_estimate[child, :, sire_geno, dam_geno, i] + np.log(projected_seg[child,:]) # The log projected_seg gives some prior based on previous loci.
-            backward_seg[child, :, i] = exp_1D_norm(probs) # This gets passed to the next loci.
-            child_seg[child,i] = select_value(probs) # This gets saved and returned.
+            exp_1D_norm(probs, backward_seg[child, :, i]) # This gets passed to the next loci.
+            child_seg[child,i] = select_value_1D(probs, select_value_tmp_1d) # This gets saved and returned.
 
     return parent_genotypes, child_seg, parent_geno_probs
 
@@ -219,12 +227,12 @@ def transmit(vect, output):
 
 
 @njit
-def project_child_to_parent(matrix, weights) :
-    output = np.full((4,4), 0, dtype = np.float32)
+def project_child_to_parent(matrix, weights, output) :
+    # output = np.full((4,4), 0, dtype = np.float32)
     for pat in range(4):
         for mat in range(4):
             # print(matrix[:, pat, mat], log_sum_exp_1D(matrix[:, pat, mat]))
-            output[pat, mat] = log_sum_exp_1D(matrix[:, pat, mat], weights) # Residual on parent genotypes.
+            output[pat, mat] += log_sum_exp_1D(matrix[:, pat, mat], weights) # Residual on parent genotypes.
     return output
 
 
@@ -263,7 +271,7 @@ def log_norm_1D(mat):
 
 
 @jit(nopython=True, nogil = True)
-def exp_1D_norm(mat):
+def exp_1D_norm(mat, output):
     # Matrix is 4: Output is to take the exponential of the matrix and normalize each locus. We need to make sure that there are not any overflow values.
     # Note, this changes the matrix in place by a constant.
     maxVal = 1 # Log of anything between 0-1 will be less than 0. Using 1 as a default.
@@ -272,19 +280,38 @@ def exp_1D_norm(mat):
             maxVal = mat[a]
     
     # Should flag for better numba-ness.
-    tmp = np.full(mat.shape[0], 0, dtype = np.float32)
+    # output = np.full(mat.shape[0], 0, dtype = np.float32)
     for a in range(mat.shape[0]):
-        tmp[a] = np.exp(mat[a] - maxVal)
+        output[a] = np.exp(mat[a] - maxVal)
 
-    norm_1D(tmp)
-    return tmp
+    norm_1D(output)
+    return output
 
 
-@njit
-def exp_2D_norm(input_mat):
-    flattened = input_mat.ravel()
-    output = exp_1D_norm(flattened)
-    return output.reshape(input_mat.shape)
+# @njit
+# def exp_2D_norm(input_mat, output):
+#     flattened = input_mat.ravel()
+#     exp_1D_norm(flattened, output.ravel())
+#     return output.reshape(input_mat.shape)
+
+@jit(nopython=True, nogil = True)
+def exp_2D_norm(mat, output):
+    # Matrix is 4: Output is to take the exponential of the matrix and normalize each locus. We need to make sure that there are not any overflow values.
+    # Note, this changes the matrix in place by a constant.
+    maxVal = 1 # Log of anything between 0-1 will be less than 0. Using 1 as a default.
+    for a in range(mat.shape[0]):
+        for b in range(mat.shape[1]):
+            if mat[a, b] > maxVal or maxVal == 1:
+                maxVal = mat[a, b]
+        
+    # Should flag for better numba-ness.
+    # output = np.full(mat.shape[0], 0, dtype = np.float32)
+    for a in range(mat.shape[0]):
+        for b in range(mat.shape[1]):
+            output[a, b] = np.exp(mat[a, b] - maxVal)
+
+    norm_2D(output)
+    return output
 
 
 @njit
@@ -369,6 +396,16 @@ def norm_1D(vect):
     for i in range(len(vect)):
         vect[i] /= count
 
+@njit
+def norm_2D(vect):
+    count = 0
+    for i in range(vect.shape[0]):
+        for j in range(vect.shape[1]):
+            count += vect[i, j]
+    for i in range(vect.shape[0]):
+        for j in range(vect.shape[1]):
+            vect[i, j] /= count
+    
 
 @njit
 def norm_1D_return(vect):
@@ -393,23 +430,54 @@ def combineAndConvertToDosage(genoProb1, genoProb2) :
     return dosages
 
 
+# @njit
+# def select_value(input_mat):
+#     flattened = input_mat.ravel()
+
+#     # weights = exp_1D_norm(flattened)
+#     # sample =  weighted_sample_1D(weights)
+
+#     max_val = np.max(flattened)
+#     indexes = np.where(np.abs(flattened - max_val) < 1e-6)[0]
+#     if len(indexes) == 1:
+#         max_index = indexes[0]
+#     else:
+#         max_index = indexes[np.random.randint(0, len(indexes))]
+#     return max_index
+
 @njit
-def select_value(input_mat):
-    flattened = input_mat.ravel()
+def select_value_1D(input_mat, tmp):
+    max_val = np.max(input_mat)
 
-    # weights = exp_1D_norm(flattened)
-    # sample =  weighted_sample_1D(weights)
-
-    max_val = np.max(flattened)
-    indexes = np.where(np.abs(flattened - max_val) < 1e-6)[0]
-    if(len(indexes) == 0) : print(flattened, max_val, indexes)
-    if len(indexes) == 1:
-        max_index = indexes[0]
+    n_hits = 0
+    for i in range(len(input_mat)):
+        if np.abs(input_mat[i] - max_val) < 1e-6:
+            tmp[n_hits] = i
+            n_hits += 1
+    
+    if n_hits == 1:
+        return tmp[0]
     else:
-        max_index = indexes[np.random.randint(0, len(indexes))]
-    # if len(flattened) > 4:
-    #     print(sample, max_index)
-    return max_index
+        return tmp[np.random.randint(n_hits)]
+
+@njit
+def select_value_2D(input_mat, tmp):
+   
+    max_val = np.max(input_mat)
+
+    n_hits = 0
+    for i in range(input_mat.shape[0]):
+        for j in range(input_mat.shape[1]):
+            if np.abs(input_mat[i, j] - max_val) < 1e-6:
+                tmp[n_hits, 0] = i
+                tmp[n_hits, 1] = j
+                n_hits += 1
+        
+    if n_hits == 1:
+        return tmp[0, 0], tmp[0, 1]
+    else:
+        index = np.random.randint(n_hits)
+        return tmp[index, 0], tmp[index, 1]
 
 
 @jit(nopython=True, nogil=True) 
