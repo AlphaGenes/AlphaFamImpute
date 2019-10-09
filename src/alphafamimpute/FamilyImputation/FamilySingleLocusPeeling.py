@@ -7,119 +7,90 @@ import numpy as np
 
 from numba import jit
 
-def imputeFamFromParentAverage(fam, pedigree) : 
+def imputeFamFromParentAverage(fam, pedigree, args) : 
 
     # Pipeline:
-    # 0) We need a segregation tensor.
-    # 1) Take all of the children, find the projection of the children up to the parents.
-    # 2) Take the parents, and find the joint genotype probabilities.
+    # 0) We need a segregation tensor and child/parent genotype probabilities.
+    # 1) Project the children up to the sire/dam.
+    # 2) Peel the sire/dam down to each of the offspring and call the offspring genotypes
+    # 3) Call the parents based on the parents + offspring. 
 
-    # 3) Combine the joint genotype probabilities of the children + parents, and impute back down to the children.
-
-    # STEP 0) We need a segregation tensor.
+    # STEP 0) We need a segregation tensor and child/parent genotype probabilities.
 
     segregation = ProbMath.generateSegregation(partial = True) #Using the partial matrix since we aren't using segregation estimates.
-
     
-    # STEP 1) Take all of the children, find the projection of the children up to the parents.
-
-    childGenoProbs = []
+    child_probs = []
     for child in fam.offspring:
-        childGenoProbs.append(ProbMath.getGenotypeProbabilities_ind(child))
+        child_probs.append(ProbMath.getGenotypeProbabilities_ind(child))
 
-    projectedGenotypes = []
-    allProjected = None
+    sire_probs = ProbMath.getGenotypeProbabilities_ind(fam.sire, log = True)
+    dam_probs = ProbMath.getGenotypeProbabilities_ind(fam.dam, log = True)
+
+    nLoci = sire_probs.shape[-1]
+    
+    # STEP 1) Project the children up to the sire/dam.
+
+    child_projection = []
+    combined_projection = np.full((4, 4, nLoci), 0, dtype = np.float32)
     for i, child in enumerate(fam.offspring):
-        projectedGenotypes.append(logPeelUp(childGenoProbs[i], segregation))
-        if allProjected is None:
-            allProjected = projectedGenotypes[i].copy()
-        else:
-            allProjected += projectedGenotypes[i]
+        child_projection.append(logPeelUp(child_probs[i], segregation))
+        combined_projection += child_projection[i]
 
     
     # STEP 2) Take the parents, and find the joint genotype probabilities.
-    
-    sireGenoProbs = ProbMath.getGenotypeProbabilities_ind(fam.sire)
-    damGenoProbs = ProbMath.getGenotypeProbabilities_ind(fam.dam)
-    jointParents = np.log(np.einsum("ai, bi -> abi", sireGenoProbs, damGenoProbs))
 
+    joint_parent_probs = np.full((4, 4, nLoci), 0, dtype = np.float32)
+    joint_parent_probs += sire_probs[:, None, :] # Add the sire genotypes.
+    joint_parent_probs += dam_probs[None, :, :] # Add the dam genotypes.
+    joint_parent_probs += combined_projection # Add the projection from all the offspring.
 
-    # 3) Combine the joint genotype probabilities of the children + parents, and impute back down to the children.
     for i, child in enumerate(fam.offspring):
-        jointParents_combined = jointParents + allProjected - projectedGenotypes[i]
-        jointParents_combined = exp_norm(jointParents_combined)
-        jointParents_combined /= np.sum(jointParents_combined, (0,1))
+        joint_without_child = joint_parent_probs - child_projection[i] # Remove an individual's contribution to their parent's genotypes.
+        joint_without_child = exp_with_rescalling(joint_without_child)
+        joint_without_child /= np.sum(joint_without_child, (0,1))
 
-        projectedDown = np.einsum("abi, abc -> ci", jointParents_combined, segregation)
-        child_combined = projectedDown * childGenoProbs[i]
+        parent_projection = np.einsum("abi, abc -> ci", joint_without_child, segregation)
+        child_combined = parent_projection * child_probs[i]
         child_combined /= np.sum(child_combined, 0)
 
-        child.dosages = np.dot(np.array([0,1,1,2]), child_combined)
+        ProbMath.call_genotype_probs(child, child_combined, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
-def getParentalGenotypesWithChildren(sire, dam, offspring) : 
+    # STEP 3) Call the parents based on parent data + offspring data.
 
-    # Pipeline:
-    # 0) We need a segregation tensor.
-    # 1) Take all of the children, find the projection of the children up to the parents.
-    # 2) Take the parents, and find the joint genotype probabilities.
+    parent_probs = exp_with_rescalling(joint_parent_probs)
+    parent_probs /= np.sum(joint_parent_probs, (0,1))
 
-    # 3) Combine the joint genotype probabilities of the children + parents, and impute back down to the children.
+    new_sireGenoProbs = np.einsum("abi -> ai", parent_probs)
+    new_damGenoProbs = np.einsum("abi -> bi", parent_probs)
 
-    # STEP 0) We need a segregation tensor.
-
-    segregation = ProbMath.generateSegregation(partial = True) #Using the partial matrix since we aren't using segregation estimates.
-
-    
-    # STEP 1) Take all of the children, find the projection of the children up to the parents.
-
-    childGenoProbs = []
-    for child in offspring:
-        childGenoProbs.append(ProbMath.getGenotypeProbabilities_ind(child))
-
-    projectedGenotypes = []
-    allProjected = None
-    for i, child in enumerate(offspring):
-        projectedGenotypes.append(logPeelUp(childGenoProbs[i], segregation))
-        if allProjected is None:
-            allProjected = projectedGenotypes[i].copy()
-        else:
-            allProjected += projectedGenotypes[i]
-
-    
-    # STEP 2) Take the parents, and find the joint genotype probabilities.
-    
-    sireGenoProbs = ProbMath.getGenotypeProbabilities_ind(sire)
-    damGenoProbs = ProbMath.getGenotypeProbabilities_ind(dam)
-    jointParents = np.log(np.einsum("ai, bi -> abi", sireGenoProbs, damGenoProbs))
-
-
-    # 3) Combine the joint genotype probabilities of the children + parents, and impute back down to the children.
-    jointParents_combined = jointParents + allProjected
-    jointParents_combined = exp_norm(jointParents_combined)
-    jointParents_combined /= np.sum(jointParents_combined, (0,1))
-
-    new_sireGenoProbs = np.einsum("abi -> ai", jointParents_combined)
-    new_damGenoProbs = np.einsum("abi -> bi", jointParents_combined)
-
-    return new_sireGenoProbs, new_damGenoProbs
+    ProbMath.call_genotype_probs(fam.sire, new_sireGenoProbs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
+    ProbMath.call_genotype_probs(fam.dam, new_damGenoProbs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
 @jit(nopython=True)
-def exp_norm(mat):
-    # Matrix is 4x4xnLoci
+def exp_with_rescalling(mat):
+    # Find the exponential of a matrix (up to a multiplicative constant). 
+    # This takes into account the fact that some of the values may be very small causing overflow/underflow issues.
+    
     nLoci = mat.shape[2]
     for i in range(nLoci):
-        maxVal = 1 #Log of anything between 0-1 will be less than 0. Using 1 as a default.
-        for a in range(4):
-            for b in range(4):
-                if mat[a, b, i] > maxVal or maxVal == 1:
-                    maxVal = mat[a, b, i]
-        for a in range(4):
-            for b in range(4):
-                mat[a, b, i] -= maxVal
+        first_val = True
+        max_val = 1 
+        for a in range(mat.shape[0]):
+            for b in range(mat.shape[1]):
+                if mat[a, b, i] > max_val or first_val:
+                    max_val = mat[a, b, i]
+                if first_val:
+                    first_val = False
+
+        for a in range(mat.shape[0]):
+            for b in range(mat.shape[1]):
+                mat[a, b, i] -= max_val
+
     return np.exp(mat)
 
 
-def logPeelUp(genoprobs, segregation):
-    jointGenotypes = np.einsum("ci, abc -> abi", genoprobs, segregation)
+def logPeelUp(probs, segregation):
+    # Peels up the genotypes of an individual onto an estimate of their parent's genotypes.
+    jointGenotypes = np.einsum("ci, abc -> abi", probs, segregation)
     return np.log(jointGenotypes)
 

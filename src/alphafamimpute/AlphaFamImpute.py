@@ -14,12 +14,6 @@ except:
         return x
 
 
-
-
-
-
-
-
 def getArgs() :
     parser = argparse.ArgumentParser(description='')
     core_parser = parser.add_argument_group("Core arguments")
@@ -29,9 +23,16 @@ def getArgs() :
     
     famParser = parser.add_argument_group("AlphaFamImpute Arguments")
     famParser.add_argument('-map',default=None, required=False, type=str, help='A genetic map file. First column is chromosome name. Second column is basepair position.')
-    famParser.add_argument('-hd_threshold', default=0.9, required=False, type=float, help='Threshold to include high-density individuals for imputation. Default: 0.9.')
-    famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to use all individuals for imputation. Equivalent to: "-hd_threshold 0". Recommended for calling GBS data.')
-    famParser.add_argument('-parentaverage', action='store_true', required=False, help='Runs single locus peeling to impute offspring. Use if a map-file is unavailable. ')
+    famParser.add_argument('-hd_threshold', default=0.9, required=False, type=float, help='Percentage of non-missing markers to classify an offspring as high-density. Only high-density individuals are used for parent phasing and imputation. Default: 0.9.')
+    famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to use all individuals for imputation. Equivalent to: "-hd_threshold 0". Recommended for GBS data.')
+    famParser.add_argument('-parentaverage', action='store_true', required=False, help='Runs single locus peeling to impute individuals based on the (imputed) parent-average genotype.')
+
+    output_parser = parser.add_argument_group("AlphaFamImpute Output Options")
+
+    output_parser.add_argument('-calling_threshold', default=0.1, required=False, type=float, help='Genotype and phase calling threshold. Default = 0.1 (best guess genotypes).')
+    output_parser.add_argument('-supress_genotypes', action='store_true', required=False, help = "Supresses the output of the called genotypes." )
+    output_parser.add_argument('-supress_dosages', action='store_true', required=False, help = "Supresses the output of the genotype dosages." )
+    output_parser.add_argument('-supress_phase', action='store_true', required=False, help = "Supresses the output of the phase information." )
 
     # Depreciated run option. 
     famParser.add_argument('-extphase', action='store_true', required=False, help=argparse.SUPPRESS) #  help='Include when using an external phase file for the parents. Skips the fullsib phase algorithm and just runs the HMM.')
@@ -52,7 +53,6 @@ def getArgs() :
 
 class Chromosome(object) :
     def __init__(self, idx, loci_range, bp_range):
-        print(idx, loci_range, bp_range)
         self.idx = idx
         self.start, self.stop = loci_range
 
@@ -108,37 +108,44 @@ def main():
     pedigree = Pedigree.Pedigree() 
     InputOutput.readInPedigreeFromInputs(pedigree, args, genotypes = True, haps = True, reads = True)
 
+    # Split data based on genetic map.
+
     if args.map is None:
         run_imputation(pedigree, args, 1/pedigree.nLoci)
 
     else:
         genetic_map = read_map(args.map)
         for chrom in genetic_map:
-            print(chrom.start, chrom.stop, chrom.rec_rate)
+            print("Now imputing", chrom.idx, chrom.start, chrom.stop, chrom.rec_rate)
             sub_pedigree = pedigree.subset(chrom.start, chrom.stop)
             run_imputation(sub_pedigree, args, chrom.rec_rate)
             pedigree.merge(sub_pedigree, chrom.start, chrom.stop)
 
-    pedigree.writePhase(args.out + ".phase")
-    pedigree.writeGenotypes(args.out + ".genotypes")
-    pedigree.writeDosages(args.out + ".dosages")
+    if not args.supress_genotypes: pedigree.writeGenotypes(args.out + ".genotypes")
+    if not args.supress_dosages: pedigree.writeDosages(args.out + ".dosages")
+    if not args.supress_phase: pedigree.writePhase(args.out + ".phase")
 
 def run_imputation(pedigree, args, rec_rate):
     for fam in pedigree.getFamilies() :
         if args.parentaverage or pedigree.nLoci == 1:
-            FamilySingleLocusPeeling.imputeFamFromParentAverage(fam, pedigree)
+            # Default to parent-average genotype in these situations.
+            FamilySingleLocusPeeling.imputeFamFromParentAverage(fam, pedigree, args)
         
         elif args.fsphase:
+            # Legacy fs-phase option.
             fsphase.imputeFamUsingFullSibs(fam, pedigree)
         
         elif args.extphase :
+            # Legacy option to phase based on a reference panel.
             FamilyImputation.imputeFamFromPhasedParents(fam, pedigree)
         
         elif args.em:
+            # Legacy option to use an EM algorithm.
             FamilyEM.imputeFamUsingFullSibs(fam, pedigree, args)
         
         else:
-            FamilyImputation.imputeFamUsingFullSibs(fam, pedigree, rec_rate, args)
+            # Current, default, phasing algorithm.
+            FamilyImputation.impute_family(fam, pedigree, rec_rate, args)
 
 
 if __name__ == "__main__":

@@ -36,11 +36,9 @@ def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, ca
 
     geno_probs = get_diploid_geno_probs(hapEst, paternal_probs, maternal_probs)
 
-    geno_probs = geno_probs/np.sum(geno_probs, axis = 0)
-
-    dosages = geno_probs[1,:] + geno_probs[2,:] + 2*geno_probs[3,:]
-
-    ind.dosages = dosages
+    return geno_probs
+    # dosages = geno_probs[1,:] + geno_probs[2,:] + 2*geno_probs[3,:]
+    # ind.dosages = dosages
 
 
 def get_multi_locus_estimate(hapEst, joint_parent_probs, child_probs):
