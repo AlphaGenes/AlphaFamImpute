@@ -1,17 +1,28 @@
 # # Using the installed program
 # # Use e.g., pip install AlphaFamImpute-0.1-py3-none-any.whl
 
-# # Runs the program in "base" mode where full sibs are used to phase the parents. The phased parents are then used to impute the offspring.
-AlphaFamImpute -out outputs/out -genotypes data/genotypes.txt -pedigree data/pedigree.txt
 
-# # Runs the program using an EM algorithm to phase the parental genotypes. These genotypes are then used to impute the offspring.
-AlphaFamImpute -out outputs/EM -genotypes data/genotypes.txt -pedigree data/pedigree.txt -em
+########################
+## Basic run commands ##
+########################
 
-# # Runs the program using external phase information on the parents. 
-# # This is a best case scenario since true phase information is known.
-AlphaFamImpute -out outputs/phased -genotypes data/genotypes.txt -pedigree data/pedigree.txt -phasefile data/truePhase_parents.txt -extphase
+# # Runs the program in "base" mode where high-density full sibs are used to phase the parents. The phased parents are then used to impute the offspring.
+AlphaFamImpute -out example/out -genotypes example/genotypes.txt -pedigree example/pedigree.txt
 
-# # Runs the program using the parent average genotype for the parents. No linkage, or phase information is used. Genotyping errors and missing genotypes are corrected using single locus peeling.
-# # This is a worst case scenario, but may be useful in some applications where no physical map is known.
-AlphaFamImpute -out outputs/parent_average -genotypes data/genotypes.txt -pedigree data/pedigree.txt -parentaverage
+# # Runs the program using GBS data to call and phase the parents and offspring.
+# # The "-gbs" flag is used to indicate that all individuals should be used to phase the parents. 
+AlphaFamImpute -out example/gbs -seqfile example/sequence.txt -pedigree example/pedigree.txt -gbs
 
+# # Runs the program using the parent average genotype for the parents using single locus peeling. No linkage, or phase information is used.
+# # Run only if marker ordering is unknown.
+AlphaFamImpute -out example/parent_average -seqfile example/sequence.txt -pedigree example/pedigree.txt -parentaverage
+
+
+###############
+## Map files ##
+###############
+
+# # A map file can also be used to impute multiple chromosomes at the same time. 
+# # If a map file is not supplied, it is assumed that the program is given a single chromosome. 
+
+AlphaFamImpute -out example_map_file/out -seqfile example_map_file/sequence.txt -pedigree example_map_file/pedigree.txt -gbs -map example_map_file/map.txt
