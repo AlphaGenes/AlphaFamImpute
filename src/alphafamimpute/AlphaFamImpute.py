@@ -116,7 +116,7 @@ def main():
     else:
         genetic_map = read_map(args.map)
         for chrom in genetic_map:
-            print("Now imputing", chrom.idx, chrom.start, chrom.stop, chrom.rec_rate)
+            print("Now imputing chromosome", chrom.idx)
             sub_pedigree = pedigree.subset(chrom.start, chrom.stop)
             run_imputation(sub_pedigree, args, chrom.rec_rate)
             pedigree.merge(sub_pedigree, chrom.start, chrom.stop)

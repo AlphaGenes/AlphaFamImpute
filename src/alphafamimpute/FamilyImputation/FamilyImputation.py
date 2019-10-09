@@ -45,7 +45,7 @@ def impute_family(fam, pedigree, rec_rate = None, args = None) :
         geno_probs = DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, args.error, rec_rate, .95)
         ProbMath.call_genotype_probs(child, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
-@Utils.time_func("Founder_imputation")
+# @Utils.time_func("Founder_imputation")
 def parent_phasing(sire, dam, children, rec_rate = None, args = None):
     nChildren = len(children)
     nLoci = len(sire.genotypes)
