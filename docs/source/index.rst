@@ -5,7 +5,6 @@
 
 .. NOTE:  added the line to the latex options:   'extraclassoptions': 'openany,oneside'
 
-
 |program|
 ==========================================
 
