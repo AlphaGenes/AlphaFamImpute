@@ -18,23 +18,32 @@ def getArgs() :
     parser = argparse.ArgumentParser(description='')
     core_parser = parser.add_argument_group("Core arguments")
     core_parser.add_argument('-out', required=True, type=str, help='The output file prefix.')
-    InputOutput.addInputFileParser(parser)
-    InputOutput.add_genotype_probability_arguments(parser)
-    
-    famParser = parser.add_argument_group("AlphaFamImpute Arguments")
-    famParser.add_argument('-map',default=None, required=False, type=str, help='A genetic map file. First column is chromosome name. Second column is basepair position.')
-    famParser.add_argument('-hd_threshold', default=0.9, required=False, type=float, help='Percentage of non-missing markers to classify an offspring as high-density. Only high-density individuals are used for parent phasing and imputation. Default: 0.9.')
-    famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to use all individuals for imputation. Equivalent to: "-hd_threshold 0". Recommended for GBS data.')
-    famParser.add_argument('-parentaverage', action='store_true', required=False, help='Runs single locus peeling to impute individuals based on the (imputed) parent-average genotype.')
+   
+    # Input options
+    input_parser = parser.add_argument_group("Input Options")
+    InputOutput.add_arguments_from_dictionary(input_parser, InputOutput.get_input_options(), options = ["bfile", "genotypes", "seqfile", "pedigree", "startsnp", "stopsnp"]) 
+    input_parser.add_argument('-map',default=None, required=False, type=str, help='A genetic map file. First column is chromosome name. Second column is basepair position.')
 
-    output_parser = parser.add_argument_group("AlphaFamImpute Output Options")
-
+    # Output options
+    output_parser = parser.add_argument_group("Output Options")
     output_parser.add_argument('-calling_threshold', default=0.1, required=False, type=float, help='Genotype and phase calling threshold. Default = 0.1 (best guess genotypes).')
     output_parser.add_argument('-supress_genotypes', action='store_true', required=False, help = "Supresses the output of the called genotypes." )
     output_parser.add_argument('-supress_dosages', action='store_true', required=False, help = "Supresses the output of the genotype dosages." )
     output_parser.add_argument('-supress_phase', action='store_true', required=False, help = "Supresses the output of the phase information." )
 
-    # Depreciated run option. 
+    # Multithreading
+    multithread_parser = parser.add_argument_group("Multithreading Options")
+    InputOutput.add_arguments_from_dictionary(multithread_parser, InputOutput.get_multithread_options(), options = ["iothreads"]) 
+
+    # General Arguments
+    famParser = parser.add_argument_group("Algorithm Arguments")
+    famParser.add_argument('-hd_threshold', default=0.9, required=False, type=float, help='Percentage of non-missing markers to classify an offspring as high-density. Only high-density individuals are used for parent phasing and imputation. Default: 0.9.')
+    famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to use all individuals for imputation. Equivalent to: "-hd_threshold 0". Recommended for GBS data.')
+    famParser.add_argument('-parentaverage', action='store_true', required=False, help='Runs single locus peeling to impute individuals based on the (imputed) parent-average genotype.')
+
+    InputOutput.add_arguments_from_dictionary(famParser, InputOutput.get_probability_options()) 
+
+    # LEGACY OPTIONS
     famParser.add_argument('-extphase', action='store_true', required=False, help=argparse.SUPPRESS) #  help='Include when using an external phase file for the parents. Skips the fullsib phase algorithm and just runs the HMM.')
     famParser.add_argument('-fsphase', action='store_true', required=False, help=argparse.SUPPRESS) # 'Flag to run a full-sib phasing algorithm.')
 
