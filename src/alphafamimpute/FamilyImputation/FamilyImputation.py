@@ -15,14 +15,23 @@ import math
 
 
 def impute_family(fam, pedigree, rec_rate = None, args = None) :
-
+    """
     # Algorithm outline:
     # 1) Generate a list of high-density (hd) and low-density (ld) offspring. For GBS use all of the offspring.
     # 2) Use the hd offspring to phase the parents. 
     # 3) Impute all of the offspring based on the phased parents.
+    """
 
+    hd_children = get_hd_children(fam, args)
+
+    parent_geno_probs = phase_parents(fam.sire, fam.dam, hd_children, rec_rate, args = None)
+    
+    impute_offspring(fam, parent_geno_probs, args)
+
+def get_hd_children(fam, args):
 
     # STEP 1: Generate a list of high-density (hd) and low-density (ld) offspring. For GBS use all of the offspring.
+
     if args.hd_threshold > 0 and not args.gbs:
         hd_children = [off for off in fam.offspring if off.getPercentMissing() <= args.hd_threshold]
         if len(hd_children) == 0:
@@ -31,22 +40,12 @@ def impute_family(fam, pedigree, rec_rate = None, args = None) :
     else:
         hd_children = fam.offspring
 
+    return hd_children
+
+
+def phase_parents(sire, dam, children, rec_rate = None, args = None):
     # STEP 2: Phase (and impute) the parents based on the high-density children. 
-    parent_geno_probs = parent_phasing(fam.sire, fam.dam, hd_children, rec_rate, args = None)
     
-    ProbMath.call_genotype_probs(fam.sire, np.sum(parent_geno_probs, 0), calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
-    ProbMath.call_genotype_probs(fam.dam, np.sum(parent_geno_probs, 1), calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
-
-
-    # Step 3: Impute all of the offspring based on the phased parents.
-
-    paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)
-    for child in fam.offspring:
-        geno_probs = DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, args.error, rec_rate, .95)
-        ProbMath.call_genotype_probs(child, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
-
-# @Utils.time_func("Founder_imputation")
-def parent_phasing(sire, dam, children, rec_rate = None, args = None):
     nChildren = len(children)
     nLoci = len(sire.genotypes)
 
@@ -79,7 +78,24 @@ def parent_phasing(sire, dam, children, rec_rate = None, args = None):
     # STEP 2: we run the phasing rounds and pass back the results.
 
     parent_geno_probs = run_phasing(child_point_estimates, parent_point_estimates, rec_rate)
+    
+    set_genotypes_from_probabilities(sire, np.sum(parent_geno_probs, 0), args)
+    set_genotypes_from_probabilities(dam, np.sum(parent_geno_probs, 1), args)
+
     return parent_geno_probs
+
+def impute_offspring(fam, parent_geno_probs, args):
+    # Step 3: Impute all of the offspring based on the phased parents.
+
+    paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)
+    for child in fam.offspring:
+        geno_probs = DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, args.error, rec_rate, calling_threshold = .95)
+        set_genotypes_from_probabilities(child, geno_probs, args)
+        
+        # ProbMath.call_genotype_probs(child, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
+
+def set_genotypes_from_probabilities(ind, geno_probs, args):
+    ProbMath.call_genotype_probs(ind, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
 @njit
 def run_phasing(child_point_estimates, parent_point_estimates, rec_rate):
@@ -91,30 +107,32 @@ def run_phasing(child_point_estimates, parent_point_estimates, rec_rate):
 
     # BACKWARD PASS -- Unknown start with phasing. 
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
-    child_seg, parent_geno_probs= phasing_round(parent_point_estimates, child_point_estimates, initial_seg, False, rec_rate = rec_rate)
+    child_seg, parent_geno_probs= run_phasing_round(parent_point_estimates, child_point_estimates, initial_seg, False, rec_rate = rec_rate)
 
     # FORWARD PASS -- Use called seg at last loci to start phasing children.  
     for i in range(nChildren):
         initial_seg[i, :] = get_transmitted_seg_matrix(child_seg[i, 0], rec_rate)
 
-    child_seg, parent_geno_probs = phasing_round(parent_point_estimates, child_point_estimates, initial_seg, True, rec_rate = rec_rate)
+    child_seg, parent_geno_probs = run_phasing_round(parent_point_estimates, child_point_estimates, initial_seg, True, rec_rate = rec_rate)
     return parent_geno_probs
 
 @njit
-def phasing_round(parent_estimate, child_estimate, initial_seg, forward, rec_rate):
+def run_phasing_round(parent_estimate, child_estimate, initial_seg, forward, rec_rate):
     nChildren = child_estimate.shape[0]
     nLoci = child_estimate.shape[-1]
 
-
     # Genotype probabilities for the parents, and called genotypes.
     parent_geno_probs = np.full((4, 4, nLoci), 9, dtype = np.float32)
-    # parent_genotypes = np.full((2, nLoci), 9, dtype = np.int64) 
-
 
     # Called child segregation, and segregation probabilities.
     child_seg = np.full((nChildren, nLoci), 9, dtype = np.int64)
     backward_seg = np.full((nChildren, 4, nLoci), .25, dtype = np.float32)
-
+    
+    # Temporary values 
+    sire_score = np.full((4, 4), 0, dtype = np.float32)
+    projected_seg = np.full((nChildren, 4), .25, dtype = np.float32)    
+    select_value_tmp_1d = np.full(4, 0, dtype = np.int64)
+    select_value_tmp_2d = np.full((4, 4), 0, dtype = np.int64)
 
     # Setup iteration across the chromosome.
     if forward == True:
@@ -126,20 +144,10 @@ def phasing_round(parent_estimate, child_estimate, initial_seg, forward, rec_rat
         stop = -1 # We need to include 0, so using -1 as the stopping point.
         step = -1 
 
-
-
     first_loci = True
-    sire_score = np.full((4, 4), 0, dtype = np.float32)
-
-    projected_seg = np.full((nChildren, 4), .25, dtype = np.float32)
-    
-    # Temporary values for select_value
-    
-    select_value_tmp_1d = np.full(4, 0, dtype = np.int64)
-    select_value_tmp_2d = np.full((4, 4), 0, dtype = np.int64)
     for i in range(start, stop, step):
 
-        # Transmit the segregation at the previous locus to the current locus. The previous locus is "i-step". Use initial_seg for the first locus.
+        # Transmit the segregation at the previous locus to the current locus. The previous locus is "i - step". Use initial_seg for the first locus.
         for child in range(nChildren):
             if first_loci:
                 projected_seg[child,:] = initial_seg[child, :]

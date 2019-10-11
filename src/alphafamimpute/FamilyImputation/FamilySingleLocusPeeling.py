@@ -1,4 +1,4 @@
-from ..tinyhouse import HaplotypeOperations
+§from ..tinyhouse import HaplotypeOperations
 from ..tinyhouse import BasicHMM
 from ..tinyhouse import ProbMath
 import math
@@ -7,7 +7,7 @@ import numpy as np
 
 from numba import jit
 
-def imputeFamFromParentAverage(fam, pedigree, args) : 
+def impute_from_parent_average(fam, pedigree, args) : 
 
     # Pipeline:
     # 0) We need a segregation tensor and child/parent genotype probabilities.

@@ -2,8 +2,8 @@ from .tinyhouse import Pedigree
 from .tinyhouse import InputOutput
 from .FamilyImputation import FamilyImputation
 from .FamilyImputation import FamilySingleLocusPeeling
-from .FamilyImputation import fsphase
-from .FamilyImputation import FamilyEM
+from .FamilyImputation import fsphase # LEGACY
+from .FamilyImputation import FamilyEM # LEGACY
 import numpy as np
 import argparse
 
@@ -52,6 +52,8 @@ def getArgs() :
 
 
 class Chromosome(object) :
+    # TODO: After testing, Move to Tinyhouse (maybe input output).
+
     def __init__(self, idx, loci_range, bp_range):
         self.idx = idx
         self.start, self.stop = loci_range
@@ -108,12 +110,12 @@ def main():
     pedigree = Pedigree.Pedigree() 
     InputOutput.readInPedigreeFromInputs(pedigree, args, genotypes = True, haps = True, reads = True)
 
-    # Split data based on genetic map.
-
     if args.map is None:
+        # Run assuming a single chromosome
         run_imputation(pedigree, args, 1/pedigree.nLoci)
 
     else:
+        # Split data based on genetic map.
         genetic_map = read_map(args.map)
         for chrom in genetic_map:
             print("Now imputing chromosome", chrom.idx)
@@ -128,8 +130,8 @@ def main():
 def run_imputation(pedigree, args, rec_rate):
     for fam in pedigree.getFamilies() :
         if args.parentaverage or pedigree.nLoci == 1:
-            # Default to parent-average genotype in these situations.
-            FamilySingleLocusPeeling.imputeFamFromParentAverage(fam, pedigree, args)
+            # Run parent-average genotype.
+            FamilySingleLocusPeeling.impute_from_parent_average(fam, pedigree, args)
         
         elif args.fsphase:
             # Legacy fs-phase option.
