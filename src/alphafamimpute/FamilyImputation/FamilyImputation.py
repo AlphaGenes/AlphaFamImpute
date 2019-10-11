@@ -24,9 +24,9 @@ def impute_family(fam, pedigree, rec_rate = None, args = None) :
 
     hd_children = get_hd_children(fam, args)
 
-    parent_geno_probs = phase_parents(fam.sire, fam.dam, hd_children, rec_rate, args = None)
+    parent_geno_probs = phase_parents(fam.sire, fam.dam, hd_children, rec_rate, args)
     
-    impute_offspring(fam, parent_geno_probs, args)
+    impute_offspring(fam, parent_geno_probs, rec_rate, args)
 
 def get_hd_children(fam, args):
 
@@ -84,7 +84,7 @@ def phase_parents(sire, dam, children, rec_rate = None, args = None):
 
     return parent_geno_probs
 
-def impute_offspring(fam, parent_geno_probs, args):
+def impute_offspring(fam, parent_geno_probs, rec_rate, args):
     # Step 3: Impute all of the offspring based on the phased parents.
 
     paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)

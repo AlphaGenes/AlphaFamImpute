@@ -3,7 +3,7 @@ import numpy as np
 from ..tinyhouse import ProbMath
 
 
-def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, calling_threashold = .95): 
+def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, calling_threshold = .95): 
 
     nLoci = len(ind.genotypes)
 
@@ -17,11 +17,11 @@ def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, ca
 
     paternal_called = np.empty(paternal_probs.shape, dtype = np.float32)
     for i in range(paternal_called.shape[0]):
-        paternal_called[i,:] = call_haplotypes(paternal_probs[i,:], calling_threashold)
+        paternal_called[i,:] = call_haplotypes(paternal_probs[i,:], calling_threshold)
 
     maternal_called = np.empty(maternal_probs.shape, dtype = np.float32)
     for i in range(maternal_called.shape[0]):
-        maternal_called[i,:] = call_haplotypes(maternal_probs[i,:], calling_threashold)
+        maternal_called[i,:] = call_haplotypes(maternal_probs[i,:], calling_threshold)
 
     non_missing_loci = np.where(np.all(paternal_called != 9, axis = 0) & np.all(maternal_called != 9, axis = 0))[0]
     missing_loci = np.where(~ (np.all(paternal_called != 9, axis = 0) & np.all(maternal_called != 9, axis = 0)))[0]
