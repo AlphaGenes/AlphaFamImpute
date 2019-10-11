@@ -1,3 +1,7 @@
+if [[ ! -f src/alphafamimpute/tinyhouse/Pedigree.py ]] ; then
+    echo Pedigree.py file not found. Check that the tinyhouse submodule is up to date
+    exit 
+fi
 
 # Create python wheel.
 rm -r build
@@ -11,8 +15,15 @@ python setup.py bdist_wheel
 target=AlphaFamImpute
 rm -rf $target
 mkdir $target
-cp dist/* $target
-cp docs/build/latex/AlphaFamImpute.pdf $target
-cp -r example/* $target
+
+# Moves the wheel over
+cp dist/* $target 
+
+# Moves the manual over
+cp docs/build/latex/AlphaFamImpute.pdf $target 
+
+# Move the examples over
+cp -r example/* $target 
+chmod 770 $target/run_examples.sh
 zip -r $target.zip AlphaFamImpute
 
