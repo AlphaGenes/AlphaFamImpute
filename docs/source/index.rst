@@ -30,7 +30,7 @@ Conditions of use
 Citation and Authorship
 -----------------------
 
-|program| is part of a body of imputation software developed by the AlphaGenes group under Professor John Hickey. The approach draws heavily on single and multi-locus iterative peeling (as in AlphaPeel). It also has been inspired by work outside our group such as _hs-phase_ (Ferdosi et al. 2014), and _magicimpute_ (Zheng et al. 2018). |program| was written by Andrew Whalen, and is currently being supported by Andrew Whalen and Steve Thorn.
+|program| is part of a body of imputation software developed by the AlphaGenes group under Professor John Hickey. The approach draws heavily on single and multi-locus iterative peeling (as in AlphaPeel). It also has been inspired by work outside our group such as *hs-phase* (Ferdosi et al. 2014), and *magicimpute* (Zheng et al. 2018). |program| was written by Andrew Whalen, and is currently being supported by Andrew Whalen and Steve Thorn.
 
 Citation:
 Whalen, A, Hickey, JM. (2019). *AlphaFamImpute: high accuracy imputation in full-sib families with genotype-by-sequencing data*. ADD BIORXIV INFORMATION.
@@ -206,7 +206,7 @@ The phase file gives the phased haplotypes (either 0 or 1) for each individual i
 Example: ::
 
   id1 0 1 9 0 # Maternal haplotype
-  id1 0 1 9 0 # paternal haplotype
+  id1 0 1 9 0 # Paternal haplotype
   id2 1 1 1 0
   id2 0 0 0 1
   id3 1 0 1 0
