@@ -1,7 +1,6 @@
 options(warn=-1)
 
 previous_run = read.table("last_stable.txt")
-
 print2 = function(string){
     cat(string)
     cat("\n")
@@ -32,8 +31,12 @@ get_accuracy = function(target, mat){
 
 get_accuracy_file_folder = function(prefix, folder){
 
+
     true_genotypes = read.table(paste0(folder, "/true_genotypes.txt"))
+    print("Genotypes")
+
     id_list = read.table(paste0(folder, "/offspring.txt"))[,1]
+    print("Offspring")
 
     true_offspring = true_genotypes[true_genotypes[,1] %in% id_list,]
     true_parents = true_genotypes[ ! true_genotypes[,1] %in% id_list,]
