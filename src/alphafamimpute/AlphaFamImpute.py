@@ -27,9 +27,9 @@ def getArgs() :
     # Output options
     output_parser = parser.add_argument_group("Output Options")
     output_parser.add_argument('-calling_threshold', default=0.1, required=False, type=float, help='Genotype and phase calling threshold. Default = 0.1 (best guess genotypes).')
-    output_parser.add_argument('-supress_genotypes', action='store_true', required=False, help = "Supresses the output of the called genotypes." )
-    output_parser.add_argument('-supress_dosages', action='store_true', required=False, help = "Supresses the output of the genotype dosages." )
-    output_parser.add_argument('-supress_phase', action='store_true', required=False, help = "Supresses the output of the phase information." )
+    output_parser.add_argument('-supress_genotypes', action='store_true', required=False, help = "Suppresses the output of the called genotypes." )
+    output_parser.add_argument('-supress_dosages', action='store_true', required=False, help = "Suppresses the output of the genotype dosages." )
+    output_parser.add_argument('-supress_phase', action='store_true', required=False, help = "Suppresses the output of the phase information." )
 
     # Multithreading
     multithread_parser = parser.add_argument_group("Multithreading Options")
