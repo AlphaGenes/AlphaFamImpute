@@ -35,7 +35,7 @@ def get_hd_children(fam, args):
     if args.hd_threshold > 0 and not args.gbs:
         hd_children = [off for off in fam.offspring if off.getPercentMissing() <= args.hd_threshold]
         if len(hd_children) == 0:
-            print(f"WARNING: There are no high-density children of parents: {fam.sire.idn} and {fam.dam.idn}. Consider using a different high-density threshold. Running with hd_threshold = 0")
+            print(f"WARNING: There are no high-density children of parents: {fam.sire.idx} and {fam.dam.idx}. Consider using a different high-density threshold. Running with hd_threshold = 0")
             hd_children = fam.offspring
     else:
         hd_children = fam.offspring

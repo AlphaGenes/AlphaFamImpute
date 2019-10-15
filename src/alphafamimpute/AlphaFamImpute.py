@@ -21,7 +21,7 @@ def getArgs() :
    
     # Input options
     input_parser = parser.add_argument_group("Input Options")
-    InputOutput.add_arguments_from_dictionary(input_parser, InputOutput.get_input_options(), options = ["bfile", "genotypes", "seqfile", "pedigree", "startsnp", "stopsnp"]) 
+    InputOutput.add_arguments_from_dictionary(input_parser, InputOutput.get_input_options(), options = ["bfile", "genotypes", "seqfile", "pedigree", "startsnp", "stopsnp", "seed"]) 
     input_parser.add_argument('-map',default=None, required=False, type=str, help='A genetic map file. First column is chromosome name. Second column is basepair position.')
 
     # Output options
@@ -127,7 +127,7 @@ def main():
         # Split data based on genetic map.
         genetic_map = read_map(args.map)
         for chrom in genetic_map:
-            print("Now imputing chromosome", chrom.idx)
+            print("Now imputing chromosome", chrom.idx, "using markers", chrom.start, "to", chrom.stop)
             sub_pedigree = pedigree.subset(chrom.start, chrom.stop)
             run_imputation(sub_pedigree, args, chrom.rec_rate)
             pedigree.merge(sub_pedigree, chrom.start, chrom.stop)

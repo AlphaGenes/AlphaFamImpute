@@ -1,0 +1,17 @@
+"folder" "prefix" "generation" "indAcc" "markerAcc"
+"outputs/out,example.1" "example" "outputs/out" "0" 0.511988047955324 -0.229916993115941
+"outputs/out,example.2" "example" "outputs/out" "1" 0.997235497436035 0.992319853990469
+"outputs/gbs,example.1" "example" "outputs/gbs" "0" 0.582914261860373 -0.0732273142250631
+"outputs/gbs,example.2" "example" "outputs/gbs" "1" 0.958183783948021 0.885960763595731
+"outputs/combined,example.1" "example" "outputs/combined" "0" 0.502310212643769 -0.24506772825178
+"outputs/combined,example.2" "example" "outputs/combined" "1" 0.99812484750161 0.99479287582952
+"outputs/parent_average,example.1" "example" "outputs/parent_average" "0" 0.922512171428952 0.794581334103312
+"outputs/parent_average,example.2" "example" "outputs/parent_average" "1" 0.91188299910347 0.734725345357288
+"outputs/out,example_map_file.1" "example_map_file" "outputs/out" "0" 0.554072200343493 -0.059460669018302
+"outputs/out,example_map_file.2" "example_map_file" "outputs/out" "1" 0.995843262396491 0.990457571842669
+"outputs/gbs,example_map_file.1" "example_map_file" "outputs/gbs" "0" 0.599041666358515 0.0548341682820106
+"outputs/gbs,example_map_file.2" "example_map_file" "outputs/gbs" "1" 0.949683916598409 0.879629813923023
+"outputs/combined,example_map_file.1" "example_map_file" "outputs/combined" "0" 0.540959480314404 -0.0777994116905961
+"outputs/combined,example_map_file.2" "example_map_file" "outputs/combined" "1" 0.99779548640191 0.994608656843505
+"outputs/parent_average,example_map_file.1" "example_map_file" "outputs/parent_average" "0" 0.920774325289797 0.807053844788544
+"outputs/parent_average,example_map_file.2" "example_map_file" "outputs/parent_average" "1" 0.90495635884862 0.755693365761986
