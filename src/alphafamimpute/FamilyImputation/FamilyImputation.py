@@ -108,11 +108,10 @@ def run_phasing(child_point_estimates, parent_point_estimates, rec_rate):
     # BACKWARD PASS -- Unknown start with phasing. 
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
     child_seg, parent_geno_probs= run_phasing_round(parent_point_estimates, child_point_estimates, initial_seg, False, rec_rate = rec_rate)
-
     # FORWARD PASS -- Use called seg at last loci to start phasing children.  
     for i in range(nChildren):
         initial_seg[i, :] = get_transmitted_seg_matrix(child_seg[i, 0], rec_rate)
-
+    
     child_seg, parent_geno_probs = run_phasing_round(parent_point_estimates, child_point_estimates, initial_seg, True, rec_rate = rec_rate)
     return parent_geno_probs
 
@@ -132,7 +131,7 @@ def run_phasing_round(parent_estimate, child_estimate, initial_seg, forward, rec
     sire_score = np.full((4, 4), 0, dtype = np.float32)
     projected_seg = np.full((nChildren, 4), .25, dtype = np.float32)    
     select_value_tmp_1d = np.full(4, 0, dtype = np.int64)
-    select_value_tmp_2d = np.full((4, 4), 0, dtype = np.int64)
+    select_value_tmp_2d = np.full((16, 2), 0, dtype = np.int64)
 
     # Setup iteration across the chromosome.
     if forward == True:
@@ -163,7 +162,6 @@ def run_phasing_round(parent_estimate, child_estimate, initial_seg, forward, rec
 
         exp_2D_norm(sire_score, parent_geno_probs[:,:,i])
         sire_geno, dam_geno = select_value_2D(sire_score, select_value_tmp_2d)
-
 
         # Update the children's segregation values based on the called parental genotypes.
         for child in range(nChildren):
