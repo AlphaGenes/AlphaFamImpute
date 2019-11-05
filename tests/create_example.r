@@ -51,17 +51,31 @@ genotypes_offspring = AlphaSimR::pullSnpGeno(gen_offspring, 1)
 genotypes = AlphaSimR::pullSnpGeno(output, 1)
 write.table2(cbind(pedigree[,1], genotypes), "true_genotypes.txt")
 
+
+### CREATE MASKED LD GENOTYPES
+
+fam_id = paste(pedigree[,2], pedigree[,3], sep = "_")
+
+families = unique(fam_id) # Create a list of full-sib families. 
+families = setdiff(families, "0_0") # Remove the founders.
+
+
+n_hd_ind = 10
+n_ld_snp = 50
+
+ld_snps = c(1, floor(seq(2, ncol(genotypes), length.out = n_ld_snp)))
+
 masked_genotypes = genotypes
-error_rate = .1
-addErrors = function(values){
-    newValues = (values + round(runif(length(values), min = 1, max = 2))) %% 3
-    return(newValues)
 
-}
 
-markers = which(rbinom(length(masked_genotypes), 1, error_rate) == 1)
-if(length(markers) >0){
-    masked_genotypes[markers] = addErrors(masked_genotypes[markers])
+for(fam in families) {
+
+    individuals = which(fam_id == fam)
+    hd_ind = individuals[1:n_hd_ind]
+    ld_ind = individuals[(n_hd_ind + 1):length(individuals)]
+
+    masked_genotypes[ld_ind, -ld_snps] = 9
+
 }
 
 write.table2(cbind(pedigree[,1], masked_genotypes), "masked_genotypes.txt")
