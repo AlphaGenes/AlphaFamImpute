@@ -56,7 +56,7 @@ Core Arguments
   Core arguments
     -out prefix              The output file prefix.
 
-The ``-out`` argument gives the output file prefix for where the outputs of AlphaFamImpute should be stored. By default, AlphaFamImpute outputs a file with inputed genotypes, ``prefix.genotypes``, phased haplotypes ``prefix.phase``, and genotype dosages ``prefix.dosages``. For more information on which files are created, see "Output Arguments", below.
+The ``-out`` argument gives the output file prefix for where the outputs of AlphaFamImpute should be stored. By default, AlphaFamImpute outputs a file with imputed genotypes, ``prefix.genotypes``, phased haplotypes ``prefix.phase``, and genotype dosages ``prefix.dosages``. For more information on which files are created, see "Output Arguments", below.
 
 Input Arguments 
 ----------------
