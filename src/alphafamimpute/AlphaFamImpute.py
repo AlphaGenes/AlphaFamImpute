@@ -112,11 +112,29 @@ def read_map(file_name):
 
     return genetic_map
 
+class AlphaFamImputeIndividual(Pedigree.Individual):
+
+    def __init__(self, idx, idn):
+        super().__init__(idx, idn)
+
+        self.original_genotypes = None
+        self.original_haplotypes = None
+
+    def save_genotypes_and_haplotypes(self):
+        self.original_genotypes = self.genotypes.copy()
+        self.original_haplotypes = (self.haplotypes[0].copy(), self.haplotypes[1].copy())
+
+    def restore_genotypes_and_haplotypes(self):
+        self.genotypes = self.original_genotypes.copy()
+        self.haplotypes = (self.original_haplotypes[0].copy(), self.original_haplotypes[1].copy())
+
+
+
 
 @profile
 def main():
     args = getArgs() 
-    pedigree = Pedigree.Pedigree() 
+    pedigree = Pedigree.Pedigree(constructor = AlphaFamImputeIndividual) 
     InputOutput.readInPedigreeFromInputs(pedigree, args, genotypes = True, haps = True, reads = True)
 
     if args.map is None:
@@ -137,7 +155,15 @@ def main():
     if not args.supress_phase: pedigree.writePhase(args.out + ".phase")
 
 def run_imputation(pedigree, args, rec_rate):
+
+    for ind in pedigree:
+        ind.save_genotypes_and_haplotypes()
+
     for fam in pedigree.getFamilies() :
+        # Reset parent information
+        fam.sire.restore_genotypes_and_haplotypes()
+        fam.dam.restore_genotypes_and_haplotypes()
+
         if args.parentaverage or pedigree.nLoci == 1:
             # Run parent-average genotype.
             FamilySingleLocusPeeling.impute_from_parent_average(fam, pedigree, args)
