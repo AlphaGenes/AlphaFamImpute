@@ -61,7 +61,7 @@ def phase_parents(sire, dam, children, rec_rate = None, args = None):
     # Children
     
     # child_point_estimates: dim_1 = segregation, dim_2 = sire_genotypes, dim_3 = dam_genotypes. 
-    child_point_estimates = np.full((nChildren, 4, 4, 4, nLoci), 0, dtype = np.float32) 
+    child_point_estimates = np.full((nLoci, 4, 4, 4, nChildren), 0, dtype = np.float32).T
     for i, child in enumerate(children):
         child_geno_probs = ProbMath.getGenotypeProbabilities_ind(child, args = args, log=True)
         get_child_point_estimate(child_point_estimates[i,:,:,:,:], child_geno_probs)
@@ -70,7 +70,7 @@ def phase_parents(sire, dam, children, rec_rate = None, args = None):
     #Parents
 
     # parent_point_estimates: dim_0 = sire_genotypes, dim_1 = dam_genotypes. 
-    parent_point_estimates = np.full((4, 4, nLoci), 0, dtype = np.float32) 
+    parent_point_estimates = np.full((nLoci, 4, 4), 0, dtype = np.float32).T
     sire_geno_probs = ProbMath.getGenotypeProbabilities_ind(sire, args = args, log=True)
     dam_geno_probs = ProbMath.getGenotypeProbabilities_ind(dam, args = args, log=True)
     fill_parent_point_estimate(parent_point_estimates, sire_geno_probs, dam_geno_probs)
@@ -79,8 +79,8 @@ def phase_parents(sire, dam, children, rec_rate = None, args = None):
 
     parent_geno_probs = run_phasing(child_point_estimates, parent_point_estimates, rec_rate)
     
-    set_genotypes_from_probabilities(sire, np.sum(parent_geno_probs, 0), args)
-    set_genotypes_from_probabilities(dam, np.sum(parent_geno_probs, 1), args)
+    set_genotypes_from_probabilities(sire, np.sum(parent_geno_probs, 1), args) # Marginalize over the dam (axis 1)
+    set_genotypes_from_probabilities(dam, np.sum(parent_geno_probs, 0), args) # Marginalize over the sire (axis 0)
 
     return parent_geno_probs
 
@@ -108,6 +108,7 @@ def run_phasing(child_point_estimates, parent_point_estimates, rec_rate):
     # BACKWARD PASS -- Unknown start with phasing. 
     initial_seg = np.full((nChildren, 4), .25, dtype = np.float32)
     child_seg, parent_geno_probs= run_phasing_round(parent_point_estimates, child_point_estimates, initial_seg, False, rec_rate = rec_rate)
+    
     # FORWARD PASS -- Use called seg at last loci to start phasing children.  
     for i in range(nChildren):
         initial_seg[i, :] = get_transmitted_seg_matrix(child_seg[i, 0], rec_rate)
@@ -121,11 +122,11 @@ def run_phasing_round(parent_estimate, child_estimate, initial_seg, forward, rec
     nLoci = child_estimate.shape[-1]
 
     # Genotype probabilities for the parents, and called genotypes.
-    parent_geno_probs = np.full((4, 4, nLoci), 9, dtype = np.float32)
+    parent_geno_probs = np.full((nLoci, 4, 4), 9, dtype = np.float32).T
 
     # Called child segregation, and segregation probabilities.
-    child_seg = np.full((nChildren, nLoci), 9, dtype = np.int64)
-    backward_seg = np.full((nChildren, 4, nLoci), .25, dtype = np.float32)
+    child_seg = np.full((nLoci, nChildren), 9, dtype = np.int64).T
+    backward_seg = np.full((nLoci, 4, nChildren), .25, dtype = np.float32).T
     
     # Temporary values 
     sire_score = np.full((4, 4), 0, dtype = np.float32)
@@ -238,8 +239,8 @@ def get_child_point_estimate(point_estimate, child_geno_probs) :
 def fill_parent_point_estimate(point_estimate, sire_geno_probs, dam_geno_probs) :
     for sire in range(4):
         for dam in range(4):
-            point_estimate[sire, dam,:] = sire_geno_probs[sire]
-            point_estimate[sire, dam,:] += dam_geno_probs[dam]
+            # On a log-scale
+            point_estimate[sire, dam,:] = sire_geno_probs[sire, :] + dam_geno_probs[dam, :]
 
 
 @njit
