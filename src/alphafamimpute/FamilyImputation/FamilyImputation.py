@@ -41,6 +41,11 @@ def get_hd_children(fam, args):
     else:
         hd_children = fam.offspring
 
+    if args.gbs:
+        print(f"Imputing family of {fam.sire.idx} and {fam.dam.idx}. Running in GBS mode with {len(hd_children)} offspring.")
+    else:
+        print(f"Imputing family of {fam.sire.idx} and {fam.dam.idx}, using {len(hd_children)} high-density offspring.")
+
     return hd_children
 
 
