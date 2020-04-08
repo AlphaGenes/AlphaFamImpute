@@ -52,7 +52,7 @@ def impute_from_parent_average(fam, pedigree, args) :
         child_combined = parent_projection * child_probs[i]
         child_combined /= np.sum(child_combined, 0)
 
-        ProbMath.call_genotype_probs(child, child_combined, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
+        ProbMath.set_from_genotype_probs(child, child_combined, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
     # STEP 3) Call the parents based on parent data + offspring data.
 
@@ -62,8 +62,8 @@ def impute_from_parent_average(fam, pedigree, args) :
     new_sireGenoProbs = np.einsum("abi -> ai", parent_probs)
     new_damGenoProbs = np.einsum("abi -> bi", parent_probs)
 
-    ProbMath.call_genotype_probs(fam.sire, new_sireGenoProbs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
-    ProbMath.call_genotype_probs(fam.dam, new_damGenoProbs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
+    ProbMath.set_from_genotype_probs(fam.sire, new_sireGenoProbs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
+    ProbMath.set_from_genotype_probs(fam.dam, new_damGenoProbs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
 @jit(nopython=True)
 def exp_with_rescalling(mat):
