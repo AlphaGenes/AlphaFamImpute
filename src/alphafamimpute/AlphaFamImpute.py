@@ -1,9 +1,10 @@
 from .tinyhouse import Pedigree
 from .tinyhouse import InputOutput
+from .tinyhouse import CombinedHMM
 from .FamilyImputation import FamilyImputation
 from .FamilyImputation import FamilySingleLocusPeeling
-from .FamilyImputation import fsphase # LEGACY
-from .FamilyImputation import FamilyEM # LEGACY
+# from .FamilyImputation import fsphase # LEGACY
+# from .FamilyImputation import FamilyEM # LEGACY
 import numpy as np
 import argparse
 
@@ -156,6 +157,9 @@ def main():
 
 def run_imputation(pedigree, args, rec_rate):
 
+    model = CombinedHMM.DiploidMarkovModel(pedigree.nLoci, args.error, rec_rate)
+
+
     for ind in pedigree:
         ind.save_genotypes_and_haplotypes()
 
@@ -168,21 +172,21 @@ def run_imputation(pedigree, args, rec_rate):
             # Run parent-average genotype.
             FamilySingleLocusPeeling.impute_from_parent_average(fam, pedigree, args)
         
-        elif args.fsphase:
-            # Legacy fs-phase option.
-            fsphase.imputeFamUsingFullSibs(fam, pedigree)
+        # elif args.fsphase:
+        #     # Legacy fs-phase option.
+        #     fsphase.imputeFamUsingFullSibs(fam, pedigree)
         
-        elif args.extphase :
-            # Legacy option to phase based on a reference panel.
-            FamilyImputation.imputeFamFromPhasedParents(fam, pedigree)
+        # elif args.extphase :
+        #     # Legacy option to phase based on a reference panel.
+        #     FamilyImputation.imputeFamFromPhasedParents(fam, pedigree)
         
-        elif args.em:
-            # Legacy option to use an EM algorithm.
-            FamilyEM.imputeFamUsingFullSibs(fam, pedigree, args)
+        # elif args.em:
+        #     # Legacy option to use an EM algorithm.
+        #     FamilyEM.imputeFamUsingFullSibs(fam, pedigree, args)
         
         else:
             # Current, default, phasing algorithm.
-            FamilyImputation.impute_family(fam, pedigree, rec_rate, args)
+            FamilyImputation.impute_family(fam, pedigree, model, rec_rate, args)
 
 
 if __name__ == "__main__":

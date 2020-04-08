@@ -1,5 +1,6 @@
 from ..tinyhouse import ProbMath
 from ..tinyhouse import InputOutput
+from ..tinyhouse import HaplotypeLibrary
 
 from . import FamilySingleLocusPeeling
 from . import DiploidHMM
@@ -14,7 +15,7 @@ from numba import jit, njit
 import math
 
 
-def impute_family(fam, pedigree, rec_rate = None, args = None) :
+def impute_family(fam, pedigree, model, rec_rate = None, args = None) :
     """
     # Algorithm outline:
     # 1) Generate a list of high-density (hd) and low-density (ld) offspring. For GBS use all of the offspring.
@@ -27,7 +28,7 @@ def impute_family(fam, pedigree, rec_rate = None, args = None) :
 
     parent_geno_probs = phase_parents(fam.sire, fam.dam, hd_children, rec_rate, args)
     
-    impute_offspring(fam, parent_geno_probs, rec_rate, args)
+    impute_offspring(fam, parent_geno_probs, model, args)
 
 def get_hd_children(fam, args):
 
@@ -90,18 +91,30 @@ def phase_parents(sire, dam, children, rec_rate = None, args = None):
 
     return parent_geno_probs
 
-def impute_offspring(fam, parent_geno_probs, rec_rate, args):
+def impute_offspring(fam, parent_geno_probs, model, args):
     # Step 3: Impute all of the offspring based on the phased parents.
 
     paternal_probs, maternal_probs = extract_haplotype_probs(parent_geno_probs)
+
+    paternal_library = create_library(paternal_probs)
+    maternal_library = create_library(maternal_probs)
+
     for child in fam.offspring:
-        geno_probs = DiploidHMM.diploidHMM(child, paternal_probs, maternal_probs, args.error, rec_rate, calling_threshold = .95)
+
+        geno_probs = model.run_HMM(individual = child, paternal_haplotype_library = paternal_library, maternal_haplotype_library = maternal_library, library_calling_threshold = .95, algorithm = "marginalize")
         set_genotypes_from_probabilities(child, geno_probs, args)
         
         # ProbMath.call_genotype_probs(child, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
+def create_library(probs):
+
+    haplotype_library = HaplotypeLibrary.HaplotypeLibrary()
+    for index in range(probs.shape[0]):
+        haplotype_library.append(probs[index,:])
+    return haplotype_library
+
 def set_genotypes_from_probabilities(ind, geno_probs, args):
-    ProbMath.call_genotype_probs(ind, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
+    ProbMath.set_from_genotype_probs(ind, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
 
 @njit
 def run_phasing(child_point_estimates, parent_point_estimates, rec_rate):

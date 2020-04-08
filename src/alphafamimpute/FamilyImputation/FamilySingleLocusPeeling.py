@@ -1,5 +1,4 @@
 from ..tinyhouse import HaplotypeOperations
-from ..tinyhouse import BasicHMM
 from ..tinyhouse import ProbMath
 import math
 
