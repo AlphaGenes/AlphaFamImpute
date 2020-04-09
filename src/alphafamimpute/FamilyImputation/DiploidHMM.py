@@ -28,6 +28,8 @@ def diploidHMM(ind, paternal_probs, maternal_probs, error, recombinationRate, ca
     ###Construct penetrance values
 
     probs = ProbMath.getGenotypeProbabilities_ind(ind)
+
+    print(probs[:,0:5])
     pointEst = getDiploidPointEstimates_probs(probs, paternal_called, maternal_called, error, non_missing_loci)
 
     

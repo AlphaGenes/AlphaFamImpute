@@ -15,6 +15,8 @@ from numba import jit, njit
 import math
 
 
+
+
 def impute_family(fam, pedigree, model, rec_rate = None, args = None) :
     """
     # Algorithm outline:

@@ -1,11 +1,13 @@
 from .tinyhouse import Pedigree
 from .tinyhouse import InputOutput
 from .tinyhouse import CombinedHMM
+from .tinyhouse import ProbMath
 from .FamilyImputation import FamilyImputation
 from .FamilyImputation import FamilySingleLocusPeeling
 # from .FamilyImputation import fsphase # LEGACY
 # from .FamilyImputation import FamilyEM # LEGACY
 import numpy as np
+from numba import jit
 import argparse
 
 try:
@@ -130,6 +132,59 @@ class AlphaFamImputeIndividual(Pedigree.Individual):
         self.haplotypes = (self.original_haplotypes[0].copy(), self.original_haplotypes[1].copy())
 
 
+class FamilyHMM(CombinedHMM.DiploidMarkovModel):
+    def __init__(self, n_loci, error, recombination_rate = None):
+        CombinedHMM.DiploidMarkovModel.__init__(self, n_loci, error, recombination_rate)
+
+
+    def get_point_estimates(self, individual, library_calling_threshold= 0.95, **kwargs):
+        paternal_haplotype_library, maternal_haplotype_library, seperate_reference_panels = self.extract_reference_panels(**kwargs)
+
+        paternal_called_haplotypes = paternal_haplotype_library.get_called_haplotypes(threshold = library_calling_threshold)
+        maternal_called_haplotypes = maternal_haplotype_library.get_called_haplotypes(threshold = library_calling_threshold)
+
+        mask = self.get_mask(paternal_called_haplotypes) & self.get_mask(maternal_called_haplotypes) 
+        
+        probs = ProbMath.getGenotypeProbabilities_ind(individual)
+
+        return self.njit_get_point_estimates(probs, paternal_called_haplotypes, maternal_called_haplotypes, self.error, mask)
+
+    @staticmethod
+    @jit(nopython=True)
+    def njit_get_point_estimates(indProbs, paternalHaplotypes, maternalHaplotypes, error, mask):
+        nPat, nLoci = paternalHaplotypes.shape
+        nMat, nLoci = maternalHaplotypes.shape
+
+        point_estimates = np.full((nLoci, nPat, nMat), 1, dtype = np.float32)
+        for i in range(nLoci):
+            if mask[i]:
+                for j in range(nPat):
+                    for k in range(nMat):
+                        # I'm just going to be super explicit here. 
+                        p_aa = indProbs[0, i]
+                        p_aA = indProbs[1, i]
+                        p_Aa = indProbs[2, i]
+                        p_AA = indProbs[3, i]
+                        e = error[i]
+
+                        # Not super clear why we need this... unless accounting for reference haplotype errors?
+
+                        if paternalHaplotypes[j,i] == 0 and maternalHaplotypes[k, i] == 0:
+                            value = p_aa*(1-e)**2 + (p_aA + p_Aa)*e*(1-e) + p_AA*e**2
+
+                        if paternalHaplotypes[j,i] == 1 and maternalHaplotypes[k, i] == 0:
+                            value = p_Aa*(1-e)**2 + (p_aa + p_AA)*e*(1-e) + p_aA*e**2
+
+                        if paternalHaplotypes[j,i] == 0 and maternalHaplotypes[k, i] == 1:
+                            value = p_aA*(1-e)**2 + (p_aa + p_AA)*e*(1-e) + p_Aa*e**2
+
+                        if paternalHaplotypes[j,i] == 1 and maternalHaplotypes[k, i] == 1:
+                            value = p_AA*(1-e)**2  + (p_aA + p_Aa)*e*(1-e) + p_aa*e**2
+
+                        point_estimates[i,j,k] = value
+        return point_estimates
+
+
 
 
 @profile
@@ -157,7 +212,7 @@ def main():
 
 def run_imputation(pedigree, args, rec_rate):
 
-    model = CombinedHMM.DiploidMarkovModel(pedigree.nLoci, args.error, rec_rate)
+    model = FamilyHMM(pedigree.nLoci, args.error, rec_rate)
 
 
     for ind in pedigree:
