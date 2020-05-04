@@ -2,7 +2,7 @@ from setuptools import Extension, find_packages, setup
 
 setup(
     name="AlphaFamImpute",
-    version="1.0.0",
+    version="1.0.1",
     author="Andrew Whalen",
     author_email="awhalen@roslin.ed.ac.uk",
     description="An imputation program for phasing and imputation in a full sib family.",
