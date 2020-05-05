@@ -193,9 +193,12 @@ def main():
     pedigree = Pedigree.Pedigree(constructor = AlphaFamImputeIndividual) 
     InputOutput.readInPedigreeFromInputs(pedigree, args, genotypes = True, haps = True, reads = True)
 
+    model = FamilyHMM(pedigree.nLoci, args.error, 1/pedigree.nLoci)
+
+
     if args.map is None:
         # Run assuming a single chromosome
-        run_imputation(pedigree, args, 1/pedigree.nLoci)
+        run_imputation(pedigree, args, 1/pedigree.nLoci, model)
 
     else:
         # Split data based on genetic map.
@@ -203,16 +206,16 @@ def main():
         for chrom in genetic_map:
             print("Now imputing chromosome", chrom.idx, "using markers", chrom.start, "to", chrom.stop)
             sub_pedigree = pedigree.subset(chrom.start, chrom.stop)
-            run_imputation(sub_pedigree, args, chrom.rec_rate)
+            run_imputation(sub_pedigree, args, chrom.rec_rate, model)
             pedigree.merge(sub_pedigree, chrom.start, chrom.stop)
 
     if not args.supress_genotypes: pedigree.writeGenotypes(args.out + ".genotypes")
     if not args.supress_dosages: pedigree.writeDosages(args.out + ".dosages")
     if not args.supress_phase: pedigree.writePhase(args.out + ".phase")
 
-def run_imputation(pedigree, args, rec_rate):
+def run_imputation(pedigree, args, rec_rate, model):
 
-    model = FamilyHMM(pedigree.nLoci, args.error, rec_rate)
+    model.update_paramaters(pedigree.nLoci, args.error, rec_rate)
 
 
     for ind in pedigree:

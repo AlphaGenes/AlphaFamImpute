@@ -25,5 +25,7 @@ cp docs/build/latex/AlphaFamImpute.pdf $target
 # Move the examples over
 cp -r example/* $target 
 chmod 770 $target/run_examples.sh
+
+rm AlphaFamImpute.zip
 zip -r $target.zip AlphaFamImpute
 
