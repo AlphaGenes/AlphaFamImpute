@@ -43,6 +43,7 @@ def getArgs() :
     famParser.add_argument('-hd_threshold', default=0.9, required=False, type=float, help='Percentage of non-missing markers to classify an offspring as high-density. Only high-density individuals are used for parent phasing and imputation. Default: 0.9.')
     famParser.add_argument('-gbs', action='store_true', required=False, help='Flag to use all individuals for imputation. Equivalent to: "-hd_threshold 0". Recommended for GBS data.')
     famParser.add_argument('-parentaverage', action='store_true', required=False, help='Runs single locus peeling to impute individuals based on the (imputed) parent-average genotype.')
+    famParser.add_argument('-viterbi', action='store_true', required=False, help='Generates maximum likelihood genotypes for the offspring.')
 
     InputOutput.add_arguments_from_dictionary(famParser, InputOutput.get_probability_options()) 
 

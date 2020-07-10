@@ -101,9 +101,13 @@ def impute_offspring(fam, parent_geno_probs, model, args):
     paternal_library = create_library(paternal_probs)
     maternal_library = create_library(maternal_probs)
 
+    algorithm = "marginalize"
+    if args.viterbi:
+        algorithm = "viterbi"
+
     for child in fam.offspring:
 
-        geno_probs = model.run_HMM(individual = child, paternal_haplotype_library = paternal_library, maternal_haplotype_library = maternal_library, library_calling_threshold = .95, algorithm = "marginalize")
+        geno_probs = model.run_HMM(individual = child, paternal_haplotype_library = paternal_library, maternal_haplotype_library = maternal_library, library_calling_threshold = .95, algorithm =algorithm)
         set_genotypes_from_probabilities(child, geno_probs, args)
         
         # ProbMath.call_genotype_probs(child, geno_probs, calling_threshold = args.calling_threshold, set_genotypes = True, set_dosages = True, set_haplotypes = True)
