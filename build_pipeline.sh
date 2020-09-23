@@ -26,6 +26,9 @@ cp docs/build/latex/AlphaFamImpute.pdf $target
 cp -r example/* $target 
 chmod 770 $target/run_examples.sh
 
+cp MIT_License.txt $target
+
+
 rm AlphaFamImpute.zip
 zip -r $target.zip AlphaFamImpute
 

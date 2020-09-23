@@ -11,6 +11,7 @@ setup(
     url="",
     packages=['alphafamimpute', 'alphafamimpute.FamilyImputation', 'alphafamimpute.tinyhouse'],
     package_dir={'': 'src'},
+    license="MIT license",
 
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -21,7 +22,7 @@ setup(
         ],
     },
     install_requires=[
-        'numpy>=1.19',
-        'numba>=0.49.0'
+        'numpy',
+        'numba'
     ]
 )

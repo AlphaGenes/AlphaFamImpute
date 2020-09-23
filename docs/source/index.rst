@@ -30,7 +30,7 @@ Conditions of use
 Citation and Authorship
 -----------------------
 
-|program| is part of a body of imputation software developed by the AlphaGenes group under John Hickey. The approach draws heavily on single and multi-locus iterative peeling (as in AlphaPeel). It also has been inspired by work outside our group such as *hs-phase* (Ferdosi et al. 2014), and *magicimpute* (Zheng et al. 2018). |program| was written by Andrew Whalen, and is currently being supported by Andrew Whalen and Steve Thorn.
+|program| is part of a suite of software that our group has developed. It is fully and freely available for all use under the MIT License.
 
 Citation:
 Whalen, A, Hickey, JM. (2019). *AlphaFamImpute: high accuracy imputation in full-sib families with genotype-by-sequencing data*. ADD BIORXIV INFORMATION.
