@@ -16,4 +16,4 @@ AlphaFamImpute is part of a suite of software that our group has developed. It i
 Suggested Citation
 ------------------
 
-Whalen, A, G. Gorjanc, J.M. Hickey, (2020), AlphaFamImpute: high accuracy imputation in full-sib families from genotype-by-sequencing data, bioRxiv.
+Andrew Whalen, Gregor Gorjanc, John M Hickey, AlphaFamImpute: high-accuracy imputation in full-sib families from genotype-by-sequencing data, Bioinformatics, Volume 36, Issue 15, 1 August 2020, Pages 4369–4371, https://doi.org/10.1093/bioinformatics/btaa499
