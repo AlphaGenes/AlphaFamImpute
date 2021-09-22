@@ -33,8 +33,7 @@ Citation and Authorship
 |program| is part of a suite of software that our group has developed. It is fully and freely available for all use under the MIT License.
 
 Citation:
-Whalen, A, Hickey, JM. (2019). *AlphaFamImpute: high accuracy imputation in full-sib families with genotype-by-sequencing data*. https://doi.org/10.1101/2019.12.11.872432
-
+Whalen, A, Gorjanc, G, Hickey, JM. (2020). *AlphaFamImpute: high accuracy imputation in full-sib families with genotype-by-sequencing data*. Bioinformatics, 36(15), 4369–4371, https://doi.org/10.1093/bioinformatics/btaa499
 
 Disclaimer
 ----------
